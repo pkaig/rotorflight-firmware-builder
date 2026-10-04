@@ -173,7 +173,8 @@ export async function buildSizeModel(sourceDir: string, elfPath: string, nmPath:
   let flash = 0;
   let ram = 0;
   let locatedFlash = 0;
-  for (const line of nm.split("\n")) {
+  // Tool output on Windows ends lines with \r\n.
+  for (const line of nm.split(/\r?\n/)) {
     const m = line.match(/^[0-9a-f]+ ([0-9a-f]+) ([A-Za-z]) (\S+)$/);
     if (!m) continue;
     const size = parseInt(m[1]!, 16);

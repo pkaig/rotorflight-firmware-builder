@@ -6,3 +6,6 @@ output/
 
 # Local build/toolchain/source cache (override with RFB_CACHE_DIR)
 .cache/
+
+# electron-builder output
+release/

@@ -169,6 +169,10 @@
   button.icon:hover:not(:disabled) { background: var(--chrome-hover); color: var(--chrome-fg); }
   .status { font-size: 11.5px; color: var(--chrome-fg-muted); font-weight: 400; }
   .status b { color: var(--color-accent-600); font-weight: 600; }
+  .envnote { margin: 12px 16px 0; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 12.5px;
+             background: var(--color-warning-soft); color: var(--color-warning); box-shadow: inset 3px 0 0 var(--color-warning); }
+  .envnote ul { margin: 6px 0 0; padding-left: 18px; }
+  .envnote code { background: rgb(0 0 0 / .2); padding: 1px 6px; border-radius: var(--radius-xs); user-select: all; }
   .boardrow { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end;
               padding: 10px 0; border-top: 1px solid var(--chrome-border); border-bottom: 1px solid var(--chrome-border); }
   #boardstatus { align-self: center; font-size: 12px; color: var(--chrome-fg-muted); }
@@ -434,6 +438,7 @@
     <span id="loadNote" class="muted"></span>
   </div>
 </header>
+<div id="envNote" class="envnote" hidden role="alert"></div>
 <div id="jobBanner" class="banner" hidden role="status" aria-live="polite">
   <div class="bannerrow">
     <span class="spinner" aria-hidden="true"></span>
@@ -493,6 +498,20 @@
     </section>
   </aside>
 </main>
+
+<dialog id="envDialog">
+  <h2>Load build environment</h2>
+  <p>Building firmware on this PC needs a few free tools that are not installed yet:</p>
+  <ul id="envList"></ul>
+  <p>Click <b>OK</b> to download and install them with winget, Windows' package manager.
+     Windows may ask for permission. Progress shows in the bar at the top and in the log.</p>
+  <p class="muted">The ARM compiler (about 180 MB) downloads automatically, and is checksum-verified,
+     the first time you load a firmware.</p>
+  <div class="dlgbtns">
+    <button id="envLater">Not now</button>
+    <button class="primary" id="envOk">OK</button>
+  </div>
+</dialog>
 
 <dialog id="dirDialog">
   <h2>Open firmware directory</h2>
@@ -1630,6 +1649,50 @@ $("themeToggle").addEventListener("click", () => {
   document.documentElement.dataset.theme = next;
   store("rfb.theme", next);
 });
+
+// Build tools this server found (make, git, sh). When something is missing,
+// offer to "load the build environment": winget downloads and installs it.
+let buildEnvInfo = null;
+function showEnv(env) {
+  buildEnvInfo = env;
+  if (env.ok) {
+    $("envNote").hidden = true;
+    if ($("envDialog").open) $("envDialog").close();
+    return;
+  }
+  $("envNote").hidden = false;
+  $("envNote").innerHTML = `<b>Firmware builds need a few tools that were not found:</b><ul>` +
+    env.problems.map((p) => `<li>${esc(p).replace(/(winget install [\w.]+)/, "<code>$1</code>")}</li>`).join("") + `</ul>` +
+    (env.canInstall
+      ? `<button class="primary" id="envInstall">Load build environment…</button>`
+      : `Install them, then restart the app. Loading and building will fail until then.`);
+}
+function promptEnv() {
+  const env = buildEnvInfo;
+  if (!env?.canInstall) return;
+  $("envList").innerHTML = env.installable.map((p) => `<li><b>${esc(p.name)}</b> <span class="mono muted">${esc(p.id)}</span></li>`).join("");
+  $("envDialog").showModal();
+}
+$("envNote").addEventListener("click", (e) => { if (e.target.id === "envInstall") promptEnv(); });
+$("envLater").addEventListener("click", () => {
+  $("envDialog").close();
+  try { sessionStorage.setItem("rfb.envLater", "1"); } catch {}
+});
+$("envOk").addEventListener("click", async () => {
+  $("envDialog").close();
+  try { await api("/api/env/install", {}); } catch (err) { appendLog(err.message, "error"); }
+});
+es.addEventListener("env", (e) => {
+  const env = JSON.parse(e.data);
+  showEnv(env);
+  appendLog(env.ok ? "Build environment ready. You can load firmware now." : "Some build tools are still missing; see the notice at the top.", env.ok ? "info" : "error");
+});
+api("/api/env").then((env) => {
+  showEnv(env);
+  let later = false;
+  try { later = sessionStorage.getItem("rfb.envLater") === "1"; } catch {}
+  if (!env.ok && env.canInstall && !later) promptEnv();
+}).catch(() => {});
 
 api("/api/state").then(async (s) => {
   renderJob(s.job);

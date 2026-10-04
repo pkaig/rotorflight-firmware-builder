@@ -1,7 +1,7 @@
 {
   "name": "rotorflight-firmware-builder",
   "version": "0.1.0",
-  "description": "Headless local firmware build module for Rotorflight (Phase 1: CLI only)",
+  "description": "Build custom Rotorflight firmware locally, with per-feature options, and flash it to the board.",
   "type": "module",
   "bin": {
     "rf-buildtool": "./dist/cli.js"
@@ -23,10 +23,50 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "cli": "node src/cli.ts",
     "test": "node --test",
-    "app": "tsc -p tsconfig.build.json && node dist/app/server.js"
+    "app": "tsc -p tsconfig.build.json && node dist/app/server.js",
+    "desktop": "tsc -p tsconfig.build.json && electron .",
+    "dist:win": "tsc -p tsconfig.build.json && electron-builder --win",
+    "dist:dir": "tsc -p tsconfig.build.json && electron-builder --dir"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.7.0"
-  }
+  },
+  "main": "electron/main.mjs",
+  "productName": "Rotorflight Firmware Builder",
+  "build": {
+    "appId": "org.rotorflight.firmware-builder",
+    "productName": "Rotorflight Firmware Builder",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "app/**",
+      "data/**",
+      "electron/**",
+      "build/icon.png",
+      "package.json",
+      "!**/*.map",
+      "!**/*.d.ts"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
+  },
+  "author": "Phil Kaighin (PDK)"
 }

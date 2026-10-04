@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { BuildToolError } from "./errors.ts";
 import { sourcesDir } from "./config.ts";
 import { exec, execCapture, type ExecEvent } from "./exec.ts";
+import { prefetchToolchain } from "./download.ts";
 
 export interface ToolchainInfo {
   /** Directory containing `arm-none-eabi-gcc` etc. */
@@ -55,10 +56,11 @@ export async function readToolchainSpec(
 /**
  * Ensure the ARM toolchain the source tree requires is installed and on hand.
  *
- * First cut: delegate to the firmware's own `make arm_sdk_install`, which
- * downloads the pinned release from developer.arm.com and verifies its published
- * checksum. We then independently confirm `arm-none-eabi-gcc -dumpversion`
- * matches `GCC_REQUIRED_VERSION` exactly (the same equality check make itself
+ * The archive is downloaded and SHA-256-verified by prefetchToolchain() first:
+ * the firmware's own `make arm_sdk_install` downloads with `curl -L -k` and
+ * checks nothing. arm_sdk_install then only unpacks the verified archive. We
+ * then independently confirm `arm-none-eabi-gcc -dumpversion` matches
+ * `GCC_REQUIRED_VERSION` exactly (the same equality check make itself
  * enforces) and fail loudly otherwise.
  */
 export async function ensureToolchain(
@@ -79,6 +81,8 @@ export async function ensureToolchain(
     if (borrowed) return { binDir: borrowed, version: requiredVersion, requiredVersion, borrowed: true };
   }
   if (version !== requiredVersion) {
+    // Download and verify the archive ourselves; arm_sdk_install then only unpacks it.
+    await prefetchToolchain(sourceDir, onEvent);
     try {
       await exec("make", ["arm_sdk_install"], { cwd: sourceDir, onEvent });
     } catch (err) {

@@ -87,7 +87,8 @@ export async function ensureSource(opts: SourceOptions): Promise<SourceInfo> {
   try {
     await exec(
       "git",
-      ["clone", "--depth", "1", "--branch", ref, FIRMWARE_REPO_URL, dir],
+      // core.longpaths: some library files in the firmware exceed Windows' 260-character limit.
+      ["-c", "core.longpaths=true", "clone", "--depth", "1", "--branch", ref, FIRMWARE_REPO_URL, dir],
       { onEvent: opts.onEvent },
     );
   } catch (err) {

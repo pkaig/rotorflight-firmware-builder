@@ -45,13 +45,24 @@ export function normalisePath(input: string): string {
 }
 
 function defaultStart(): string {
-  for (const p of ["/mnt/c/Projects/Rotorflight", "/mnt/c/Projects", homedir()]) if (existsSync(p)) return p;
+  const candidates = process.platform === "win32"
+    ? ["C:/Projects/Rotorflight", "C:/Projects", join(homedir(), "Documents"), homedir()]
+    : ["/mnt/c/Projects/Rotorflight", "/mnt/c/Projects", homedir()];
+  for (const p of candidates) if (existsSync(p)) return p;
   return homedir();
+}
+
+/** Starting points: home and projects folders, plus every drive letter on Windows. */
+function rootsList(): string[] {
+  if (process.platform !== "win32") return [homedir(), "/mnt/c/Projects", "/mnt/c"].filter((r) => existsSync(r));
+  // Forward slashes work everywhere on Windows and need no escaping.
+  const drives = "CDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((d) => `${d}:/`).filter((d) => existsSync(d));
+  return [homedir(), "C:/Projects", ...drives].filter((r) => existsSync(r));
 }
 
 export async function listDirs(input: string): Promise<DirListing> {
   const path = input ? normalisePath(input) : defaultStart();
-  const roots = [homedir(), "/mnt/c/Projects", "/mnt/c"].filter((r) => existsSync(r));
+  const roots = rootsList();
   const parent = dirname(path) === path ? null : dirname(path);
   try {
     const entries = await readdir(path, { withFileTypes: true });

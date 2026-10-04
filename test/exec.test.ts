@@ -16,7 +16,9 @@ test("streams output one line at a time via onEvent", async () => {
   await exec(NODE, ["-e", "console.log('a'); console.log('b'); console.error('c')"], {
     onEvent: (e) => lines.push(`${e.stream}:${e.line}`),
   });
-  assert.deepEqual(lines, ["stdout:a", "stdout:b", "stderr:c"]);
+  // stdout and stderr are separate pipes, so only the order within each is guaranteed.
+  assert.deepEqual(lines.filter((l) => l.startsWith("stdout:")), ["stdout:a", "stdout:b"]);
+  assert.deepEqual(lines.filter((l) => l.startsWith("stderr:")), ["stderr:c"]);
 });
 
 test("non-zero exit rejects with BUILD_FAILED unless allowNonZero", async () => {

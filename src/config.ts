@@ -30,7 +30,7 @@ export function cacheRoot(): string {
 export const sourcesDir = () => join(cacheRoot(), "sources");
 
 /** Default directory the finished artifacts are copied into. */
-export const DEFAULT_OUTPUT_DIR = join(process.cwd(), "output");
+export const DEFAULT_OUTPUT_DIR = process.env.RFB_OUTPUT_DIR ?? join(process.cwd(), "output");
 
 /** Firmware fork name — used to locate the produced `<forkname>_<ver>_<target>.hex`. */
 export const FORK_NAME = "rotorflight";

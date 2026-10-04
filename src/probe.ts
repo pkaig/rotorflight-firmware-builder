@@ -123,7 +123,8 @@ export interface PreviewResult {
   options: string[];
 }
 
-const PROBE_STUB = ".rfb-probe.c";
+/** Null device for the compiler's output (gcc on Windows has no /dev/null). */
+const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 const USE_TOKEN = /\bUSE_[A-Z0-9_]+\b/g;
 const CONDITIONAL = /^\s*#\s*(?:if|ifdef|ifndef|elif)\b/;
 
@@ -131,22 +132,27 @@ const CONDITIONAL = /^\s*#\s*(?:if|ifdef|ifndef|elif)\b/;
 export class TargetPreprocessor {
   private readonly sourceDir: string;
   private readonly command: string;
+  /** The one-line stub that is preprocessed; kept out of the firmware tree. */
+  private readonly stub: string;
 
-  private constructor(sourceDir: string, command: string) {
+  private constructor(sourceDir: string, command: string, stub: string) {
     this.sourceDir = sourceDir;
     this.command = command;
+    this.stub = stub;
   }
 
   static async create(ctx: ProbeContext): Promise<TargetPreprocessor> {
     const cflags = await targetCflags(ctx);
-    await writeFile(join(ctx.sourceDir, PROBE_STUB), '#include "platform.h"\n');
-    const gcc = join(ctx.binDir, "arm-none-eabi-gcc");
-    return new TargetPreprocessor(ctx.sourceDir, `${shellQuote(gcc)} -E ${cflags}`);
+    // platform.h is found through the target's -I paths, so the stub can live anywhere.
+    const stub = join(await mkdtemp(join(tmpdir(), "rfb-")), "probe.c");
+    await writeFile(stub, '#include "platform.h"\n');
+    const gcc = join(ctx.binDir, process.platform === "win32" ? "arm-none-eabi-gcc.exe" : "arm-none-eabi-gcc");
+    return new TargetPreprocessor(ctx.sourceDir, `${shellQuote(posixPath(gcc))} -E ${cflags}`, stub);
   }
 
   /** Diagnostics-only pass: returns the error lines (empty when clean). */
   async diagnose(flags: string[]): Promise<string[]> {
-    const r = await this.run(`${this.flags(flags)} -o /dev/null`);
+    const r = await this.run(`${this.flags(flags)} -o ${NULL_DEVICE}`);
     return r.code === 0 ? [] : errorLines(r.stderr);
   }
 
@@ -159,7 +165,8 @@ export class TargetPreprocessor {
   async macros(flags: string[]): Promise<Map<string, string>> {
     const r = await this.run(`-dM ${this.flags(flags)}`);
     const out = new Map<string, string>();
-    for (const m of r.stdout.matchAll(/^#define ([A-Za-z_][A-Za-z0-9_]*)(?:\([^)]*\))? ?(.*)$/gm)) out.set(m[1]!, m[2]!);
+    // (.*?)\r?$ — gcc on Windows ends lines with \r\n.
+    for (const m of r.stdout.matchAll(/^#define ([A-Za-z_][A-Za-z0-9_]*)(?:\([^)]*\))? ?(.*?)\r?$/gm)) out.set(m[1]!, m[2]!);
     return out;
   }
 
@@ -169,7 +176,7 @@ export class TargetPreprocessor {
         throw new BuildToolError("INVALID_ARGS", `Refusing to pass malformed define "${f}".`);
       }
     }
-    return [...flags.map((f) => `-D${f}`), PROBE_STUB].join(" ");
+    return [...flags.map((f) => `-D${f}`), shellQuote(posixPath(this.stub))].join(" ");
   }
 
   private run(args: string) {
@@ -402,7 +409,7 @@ async function targetCflags(ctx: ProbeContext): Promise<string> {
     ["-f", "Makefile", "-f", mk, `TARGET=${ctx.target}`, ...vars, "rfb-print-cflags"],
     { cwd: ctx.sourceDir },
   );
-  const line = r.stdout.split("\n").find((l) => l.startsWith("RFB_CFLAGS="));
+  const line = r.stdout.split(/\r?\n/).find((l) => l.startsWith("RFB_CFLAGS="));
   if (!line) {
     throw new BuildToolError("BUILD_FAILED", "Could not read CFLAGS from the firmware Makefile.", r.stdout);
   }
@@ -670,9 +677,14 @@ async function pool<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]>
 
 function errorLines(stderr: string): string[] {
   return stderr
-    .split("\n")
+    .split(/\r?\n/)
     .filter((l) => /\berror:/.test(l))
     .map((l) => l.replace(/^.*?error:\s*/, "").replace(/\s*\[-Werror\]$/, "").trim());
+}
+
+/** Forward slashes: understood by the MSYS shell and by gcc on Windows alike. */
+function posixPath(p: string): string {
+  return p.replace(/\\/g, "/");
 }
 
 function shellQuote(s: string): string {

@@ -22,9 +22,11 @@ tab. See the project scope document for the full plan.
 - ~1 GB free disk per cached firmware ref (source + ARM toolchain)
 
 The ARM toolchain (`arm-none-eabi-gcc`, pinned by the firmware's
-`GCC_REQUIRED_VERSION`) is installed automatically on first build via the
-firmware's own `make arm_sdk_install`, which fetches it from `developer.arm.com`
-and verifies the published checksum.
+`GCC_REQUIRED_VERSION`) is installed automatically on first build. The archive
+is downloaded from `developer.arm.com` by this tool, with retries and resume,
+and checked against a pinned SHA-256 (`src/download.ts`). The firmware's own
+`make arm_sdk_install` then only unpacks it; on its own it downloads with
+`curl -k` and verifies nothing.
 
 ## Usage
 

@@ -1,5 +1,7 @@
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { createHash } from "node:crypto";
+import { cacheRoot } from "./config.ts";
 import { availableParallelism } from "node:os";
 import { BuildToolError } from "./errors.ts";
 import { exec, execCapture, type ExecEvent } from "./exec.ts";
@@ -13,7 +15,9 @@ import { parseMemoryUsage, type MemoryRegion } from "./size.ts";
  * `make clean` whenever the target or option set differs from the previous build
  * in that source tree, tracked via this stamp file.
  */
-const STAMP_FILE = ".rfb-build-stamp";
+/** Kept in the app's cache, keyed by tree, so nothing is written into the user's firmware clone. */
+const stampFile = (sourceDir: string) =>
+  join(cacheRoot(), "stamps", `${createHash("sha1").update(sourceDir).digest("hex").slice(0, 16)}.txt`);
 
 export interface BuildInput {
   sourceDir: string;
@@ -84,7 +88,8 @@ export async function runBuild(input: BuildInput): Promise<BuildResult> {
     .map(([k, v]) => `${k}=${v}`);
 
   // Clean when the target / options / make-vars differ from the last build here.
-  const stampPath = join(sourceDir, STAMP_FILE);
+  const stampPath = stampFile(sourceDir);
+  await mkdir(dirname(stampPath), { recursive: true });
   const stamp = `${target}\n${options.join(" ")}\n${makeVars.join(" ")}`;
   const previous = await readFile(stampPath, "utf8").catch(() => "");
   if (previous !== stamp && !input.incremental) {

@@ -10,8 +10,10 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { detectBuildEnv, installBuildTools, type BuildEnv } from "../buildenv.ts";
 import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
@@ -164,7 +166,7 @@ async function saveBaseline(s: Session, rec: BaselineRecord) {
 async function attachModel(s: Session) {
   const elf = s.sizes.baseline?.elfPath;
   if (!elf || !existsSync(elf)) return;
-  s.model = await buildSizeModel(s.sourceDir, elf, join(s.binDir, "arm-none-eabi-nm"));
+  s.model = await buildSizeModel(s.sourceDir, elf, join(s.binDir, process.platform === "win32" ? "arm-none-eabi-nm.exe" : "arm-none-eabi-nm"));
   s.sizes.located = s.model.locatedFlash / s.model.flash;
 }
 
@@ -545,6 +547,30 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return send(res, 200, { targets, fromSource });
     }
 
+    case "GET /api/env":
+      // Which build environment this server uses, and what is missing.
+      return send(res, 200, publicEnv(buildEnv ?? (await detectBuildEnv())));
+
+    case "POST /api/env/install": {
+      // "Load build environment": install the missing tools with winget, then re-check.
+      const env = buildEnv ?? (await detectBuildEnv());
+      if (!env.canInstall) return send(res, 400, { error: env.ok ? "Nothing to install." : "winget is not available to install the tools." });
+      const started = startJob("setup", "Loading build environment", async () => {
+        step(`Installing ${env.installable!.map((p) => p.name).join(" and ")} (Windows may ask for permission)`);
+        await installBuildTools(env.installable!, (line, stream) => log(line, stream));
+        step("Checking the build tools");
+        buildEnv = await detectBuildEnv(true);
+        if (buildEnv.ok) {
+          process.env.PATH = buildEnv.path;
+          log("Build environment ready.");
+        } else {
+          for (const p of buildEnv.problems) log(p, "error");
+        }
+        emit("env", publicEnv(buildEnv));
+      });
+      return send(res, started ? 202 : 409, started ? { ok: true } : { error: `busy: ${busy}` });
+    }
+
     case "GET /api/releases":
       return send(res, 200, { releases: await listReleases() });
 
@@ -697,56 +723,110 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   send(res, 404, { error: "not found" });
 }
 
-const { values } = parseArgs({
-  args: process.argv.slice(2),
-  options: {
-    port: { type: "string", default: "4780" },
-    host: { type: "string", default: "127.0.0.1" },
-  },
-});
 
-if (process.platform === "win32" && !process.env.RFB_NO_WSL) {
-  relaunchInWsl();
-} else {
-  createServer((req, res) => {
-    handle(req, res).catch((err) => {
-      if (!res.headersSent) send(res, 500, { error: String(err) });
-      else res.end();
-    });
-  })
-    .on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code !== "EADDRINUSE") throw err;
-      process.stderr.write(
-        `Port ${values.port} is already in use — the app is probably already running.\n` +
-          `Open http://localhost:${values.port}, or start another with --port <n>.\n`,
-      );
-      process.exit(1);
-    })
-    .listen(Number(values.port), values.host, () => {
-      process.stdout.write(`Rotorflight build sample app: http://localhost:${values.port}\n`);
-    });
+/** The build environment found at start-up (make, git, shell), reported to the page. */
+let buildEnv: BuildEnv | undefined;
+
+export interface StartedServer {
+  port: number;
+  url: string;
+  close(): void;
 }
 
 /**
- * The firmware Makefile needs a POSIX environment, so on Windows hand off to
- * WSL (whose localhost is forwarded to the Windows browser). WSL's Node 22 does
- * not strip TypeScript, so the compiled dist/ copy is what runs there.
+ * Start the app server: used by `npm run app` and, in-process, by the desktop
+ * (Electron) app. Port 0 picks any free port.
  */
-function relaunchInWsl() {
+export async function startServer(opts: { port?: number; host?: string } = {}): Promise<StartedServer> {
+  buildEnv = await detectBuildEnv();
+  // Every build process (make, git, sh, gcc) inherits this PATH.
+  if (buildEnv.ok) process.env.PATH = buildEnv.path;
+  for (const p of buildEnv.problems) process.stderr.write(`Build environment: ${p}\n`);
+
+  const host = opts.host ?? "127.0.0.1";
+  return new Promise((resolvePromise, reject) => {
+    const server = createServer((req, res) => {
+      handle(req, res).catch((err) => {
+        if (!res.headersSent) send(res, 500, { error: String(err) });
+        else res.end();
+      });
+    });
+    server.once("error", reject);
+    server.listen(opts.port ?? 4780, host, () => {
+      const port = (server.address() as AddressInfo).port;
+      resolvePromise({ port, url: `http://localhost:${port}`, close: () => server.close() });
+    });
+  });
+}
+
+/** What the page is told about the build environment (no PATH). */
+function publicEnv(env: BuildEnv) {
+  const { path: _path, ...rest } = env;
+  return { platform: process.platform, ...rest };
+}
+
+export function currentBuildEnv(): BuildEnv | undefined {
+  return buildEnv;
+}
+
+/** Command-line entry: `npm run app` / `node dist/app/server.js [--port n] [--host h]`. */
+async function main() {
+  const { values } = parseArgs({
+    args: process.argv.slice(2),
+    options: {
+      port: { type: "string", default: "4780" },
+      host: { type: "string", default: "127.0.0.1" },
+    },
+  });
+  const port = Number(values.port);
+  const host = values.host!;
+
+  // Windows: build natively when Git for Windows and GNU make are present;
+  // otherwise fall back to WSL, which is how this app first ran.
+  if (process.platform === "win32" && !process.env.RFB_NO_WSL) {
+    const env = await detectBuildEnv();
+    if (!env.ok) {
+      process.stdout.write(`Native Windows build tools are incomplete:\n${env.problems.map((p) => `  - ${p}`).join("\n")}\n`);
+      return relaunchInWsl(port, host);
+    }
+    process.stdout.write("Windows: building natively with Git for Windows + GNU make.\n");
+  }
+  try {
+    const s = await startServer({ port, host });
+    process.stdout.write(`Rotorflight Firmware Builder: ${s.url}\n`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
+    process.stderr.write(
+      `Port ${port} is already in use — the app is probably already running.\n` +
+        `Open http://localhost:${port}, or start another with --port <n>.\n`,
+    );
+    process.exit(1);
+  }
+}
+
+const isMain = !!process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) main();
+
+/**
+ * Without native tools on Windows, hand off to WSL (whose localhost is
+ * forwarded to the Windows browser). WSL's Node 22 does not strip TypeScript,
+ * so the compiled dist/ copy is what runs there.
+ */
+function relaunchInWsl(port: number, host: string) {
   const root = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
   const wslRoot = spawnSync("wsl", ["-e", "wslpath", "-a", root.replace(/\\/g, "/")], {
     encoding: "utf8",
   });
   if (wslRoot.status !== 0) {
     process.stderr.write(
-      "This app must run where the firmware builds (WSL on Windows), but `wsl` failed.\n" +
-        "Set RFB_NO_WSL=1 to run natively anyway (builds will fail without make).\n",
+      "No native build tools and no WSL either. Install Git for Windows and GNU make\n" +
+        "(winget install Git.Git, winget install ezwinports.make), or set up WSL.\n",
     );
     process.exit(1);
   }
   const dir = wslRoot.stdout.trim();
-  const script = `cd ${shQuote(dir)} && exec node dist/app/server.js --port ${Number(values.port)} --host ${shQuote(values.host!)}`;
-  process.stdout.write("Windows detected: starting the app inside WSL…\n");
+  const script = `cd ${shQuote(dir)} && exec node dist/app/server.js --port ${port} --host ${shQuote(host)}`;
+  process.stdout.write("Starting the app inside WSL instead…\n");
   const child = spawn("wsl", ["-e", "bash", "-lc", script], { stdio: "inherit" });
   child.on("exit", (code) => process.exit(code ?? 1));
 }
