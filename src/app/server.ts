@@ -1,0 +1,756 @@
+#!/usr/bin/env node
+/**
+ * Sample app: a local web UI with one toggle per firmware option, to prove (or
+ * disprove) the select -> build process end to end. Zero dependencies — a
+ * node:http server driving the same `buildFirmware()` the CLI uses.
+ *
+ * Run it where the firmware builds (WSL on Windows), open the printed URL in a
+ * browser. WSL2 forwards localhost, so a Windows browser reaches it directly.
+ */
+
+import { spawn, spawnSync } from "node:child_process";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { parseArgs } from "node:util";
+import { fileURLToPath } from "node:url";
+import {
+  buildFirmware,
+  ensureSource,
+  ensureToolchain,
+  isBuildToolError,
+  KNOWN_UNIFIED_TARGETS,
+  guardMap,
+  previewSelection,
+  probeOptions,
+  selectionOptions,
+  TargetPreprocessor,
+  validTargetsFromSource,
+  type ProbeResult,
+  type Selection,
+} from "../index.ts";
+import { DEFAULT_OUTPUT_DIR } from "../config.ts";
+import { boardTarget, listBoards } from "../boards.ts";
+import { annotateOptions, loadOptionInfo } from "../option-info.ts";
+import { cachedSourcePath } from "../source.ts";
+import { boardConfig } from "../boards.ts";
+import { insertConfig, parseHex, prepareBoardConfig } from "../hex.ts";
+import { listReleases, nearestRelease, releaseHexSize, treeVersion, type ReleaseSize } from "../releases.ts";
+import { exec } from "../exec.ts";
+import { listDirs, normalisePath } from "./dirs.ts";
+import { needsMirror, syncMirror } from "./mirror.ts";
+import { buildSizeModel, estimateRemoval, type MemoryRegion, type SizeModel } from "../size.ts";
+import { cacheRoot } from "../config.ts";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+
+const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
+const PAGE = join(ROOT, "app", "index.html");
+const OPTION_INFO = join(ROOT, "data", "option-info.json");
+
+interface Session {
+  ref: string;
+  commit: string;
+  sourceDir: string;
+  /** True when building a local tree as-is (no checkout). */
+  local: boolean;
+  /** The user's own folder when sourceDir is a WSL mirror of it. */
+  origin?: string;
+  /** Source files changed in the folder since it was probed (re-probe to pick up new guards). */
+  staleFiles?: string[];
+  target: string;
+  makeVars: Record<string, string>;
+  pp: TargetPreprocessor;
+  probe: ProbeResult;
+  binDir: string;
+  sizes: SizeInfo;
+  /** Removal-estimate model from the baseline ELF (server-side only). */
+  model?: SizeModel;
+}
+
+interface BaselineRecord {
+  /** text + data, as arm-none-eabi-size reports it. */
+  flash: number;
+  /** data + bss (unknown for an official release: it publishes no ELF). */
+  ram?: number;
+  /**
+   * "build" = measured locally; "official" = this exact release's published hex;
+   * "nearest" = a local tree approximated by the nearest release's hex.
+   */
+  source?: "build" | "official" | "nearest" | "previous";
+  /** For a "previous" baseline: the commit it was built at. */
+  commit?: string;
+  /** For an official baseline: the release tag and asset it came from. */
+  tag?: string;
+  asset?: string;
+  memory?: MemoryRegion[];
+  elfPath?: string;
+  at: string;
+}
+
+interface SizeInfo {
+  /** TARGET_FLASH_SIZE in KB. */
+  flashKb?: number;
+  baseline?: BaselineRecord;
+  /** Share of baseline flash the estimator could locate in the source. */
+  located?: number;
+  /** Size of the official release build, from the hex published on GitHub. */
+  official?: ReleaseSize;
+  /** For a local tree not at a release tag: the nearest earlier release, for reference. */
+  nearest?: ReleaseSize;
+  /** A local tree at a release tag but with uncommitted edits. */
+  modifiedFromTag?: boolean;
+  /** Firmware/RAM region sizes for this target from any earlier local build (capacity only). */
+  capacity?: MemoryRegion[];
+}
+
+/** The most recent baseline build of the same folder, target and make vars, at any commit. */
+function latestBaselineOfTree(
+  records: Record<string, BaselineRecord>,
+  s: Pick<Session, "commit" | "target" | "makeVars" | "local" | "sourceDir">,
+): [BaselineRecord, string] | [] {
+  const [, target, vars, dir] = baselineKey(s).split("|");
+  const hits = Object.entries(records)
+    .filter(([k, r]) => {
+      const p = k.split("|");
+      return p[1] === target && p[2] === vars && p[3] === dir && !!r.elfPath && existsSync(r.elfPath);
+    })
+    .sort(([, a], [, b]) => b.at.localeCompare(a.at));
+  return hits[0] ? [hits[0][1], hits[0][0]] : [];
+}
+
+/** Official size as a baseline, comparable with builds that do or don't carry the erase marker. */
+function officialBaseline(o: ReleaseSize, makeVars: Record<string, string>): BaselineRecord {
+  const withMarker = makeVars.FLASH_CONFIG_ERASE === "yes";
+  return {
+    flash: withMarker ? o.flash : o.flash - o.marker,
+    source: "official",
+    tag: o.tag,
+    asset: o.asset,
+    at: new Date().toISOString(),
+  };
+}
+
+/** git in a tree, best effort ("" on failure). Reads refs only, so it is quick even via a mirror. */
+async function git(dir: string, args: string[]): Promise<string> {
+  try {
+    const r = await exec("git", ["-C", dir, ...args], { allowNonZero: true });
+    return r.code === 0 ? r.stdout.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Baselines survive restarts, keyed by what produced them. */
+const SIZES_FILE = () => join(cacheRoot(), "baselines.json");
+const baselineKey = (s: Pick<Session, "commit" | "target" | "makeVars" | "local" | "sourceDir">) =>
+  [s.commit, s.target, JSON.stringify(Object.entries(s.makeVars).sort()), s.local ? s.sourceDir : ""].join("|");
+
+async function readBaselines(): Promise<Record<string, BaselineRecord>> {
+  try {
+    return JSON.parse(await readFile(SIZES_FILE(), "utf8")) as Record<string, BaselineRecord>;
+  } catch {
+    return {};
+  }
+}
+
+async function saveBaseline(s: Session, rec: BaselineRecord) {
+  const all = await readBaselines();
+  all[baselineKey(s)] = rec;
+  await mkdir(cacheRoot(), { recursive: true });
+  await writeFile(SIZES_FILE(), JSON.stringify(all, null, 2));
+}
+
+async function attachModel(s: Session) {
+  const elf = s.sizes.baseline?.elfPath;
+  if (!elf || !existsSync(elf)) return;
+  s.model = await buildSizeModel(s.sourceDir, elf, join(s.binDir, "arm-none-eabi-nm"));
+  s.sizes.located = s.model.locatedFlash / s.model.flash;
+}
+
+interface HistoryEntry {
+  at: string;
+  target: string;
+  commit: string;
+  options: string[];
+  ok: boolean;
+  error?: string;
+  flash?: number;
+  text?: number;
+  data?: number;
+  bss?: number;
+  hexPath?: string;
+  durationMs: number;
+  /** Make variables the build used (e.g. FLASH_CONFIG_ERASE). */
+  makeVars?: Record<string, string>;
+  /** Where the source came from, for the flash confirmation. */
+  source?: string;
+}
+
+let session: Session | undefined;
+let busy: string | undefined;
+/** Builds survive restarts (the .hex files are kept in output/ anyway). */
+const HISTORY_FILE = () => join(cacheRoot(), "history.json");
+const history: HistoryEntry[] = (() => {
+  try {
+    return JSON.parse(readFileSync(HISTORY_FILE(), "utf8")) as HistoryEntry[];
+  } catch {
+    return [];
+  }
+})();
+function saveHistory() {
+  mkdir(cacheRoot(), { recursive: true })
+    .then(() => writeFile(HISTORY_FILE(), JSON.stringify(history.slice(-200), null, 1)))
+    .catch(() => {});
+}
+const clients = new Set<ServerResponse>();
+
+function emit(event: string, data: unknown) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const c of clients) c.write(payload);
+}
+
+/** Recent log lines, replayed to a page opened mid-job. */
+const logTail: { line: string; stream: string }[] = [];
+const log = (line: string, stream = "info") => {
+  logTail.push({ line, stream });
+  if (logTail.length > 400) logTail.splice(0, logTail.length - 400);
+  emit("log", { line, stream });
+};
+
+/** What the running job is doing, for the page's progress banner. */
+interface JobState {
+  name: string;
+  title: string;
+  step: string;
+  done?: number;
+  total?: number;
+  started: number;
+}
+let job: JobState | null = null;
+let lastJobEmit = 0;
+function step(text: string, done?: number, total?: number) {
+  if (!job) return;
+  const changed = job.step !== text;
+  job = { ...job, step: text, ...(done !== undefined ? { done, total } : { done: undefined, total: undefined }) };
+  // Throttle counter updates; always send step changes.
+  if (changed || Date.now() - lastJobEmit > 250) {
+    lastJobEmit = Date.now();
+    emit("job", job);
+  }
+}
+/** Files compiled per (tree, target) last time, to turn the compile count into a percentage. */
+const compileTotals = new Map<string, number>();
+
+/** Run one long job at a time, reporting its outcome over SSE. */
+function startJob(name: string, title: string, run: () => Promise<void>): boolean {
+  if (busy) return false;
+  busy = name;
+  job = { name, title, step: "Starting…", started: Date.now() };
+  emit("busy", { busy });
+  emit("job", job);
+  run()
+    .catch((err) => {
+      const message = isBuildToolError(err) ? `[${err.code}] ${err.message}` : String(err);
+      log(message, "error");
+      if (isBuildToolError(err) && err.detail) {
+        for (const l of err.detail.split("\n").slice(-40)) log(l, "stderr");
+      }
+      emit("job-error", { job: name, message });
+    })
+    .finally(() => {
+      busy = undefined;
+      job = null;
+      emit("busy", { busy: null });
+      emit("job", null);
+    });
+  return true;
+}
+
+interface LoadRequest {
+  target: string;
+  ref: string;
+  sourceDir?: string;
+  configErase?: boolean;
+}
+
+async function load(req: LoadRequest) {
+  const onEvent = (e: { stream: string; line: string }) => log(e.line, e.stream);
+  log(`Resolving source ${req.sourceDir ? `${req.sourceDir} (as-is)` : req.ref}…`);
+  let buildDir = req.sourceDir || undefined;
+  let origin: string | undefined;
+  if (buildDir && needsMirror(buildDir)) {
+    step("Copying the local tree into WSL (first time: a minute or two)");
+    const m = await syncMirror(buildDir);
+    log(`Mirrored ${buildDir} to ${m.dir}${m.firstSync ? "" : ` (${m.changed.length} source file(s) changed)`}.`);
+    origin = buildDir;
+    buildDir = m.dir;
+  } else {
+    step(req.sourceDir ? "Reading the local tree" : "Fetching source from GitHub (first time: about a minute)");
+  }
+  const source = await ensureSource({
+    ref: req.ref,
+    sourceDir: buildDir,
+    asIs: Boolean(req.sourceDir),
+    onEvent,
+  });
+
+  const targets = await validTargetsFromSource(source.dir);
+  if (!targets.includes(req.target)) throw new Error(`Unknown target ${req.target}`);
+
+  log("Checking toolchain…");
+  step("Checking toolchain (first time: downloads about 100 MB)");
+  const toolchain = await ensureToolchain(source.dir, onEvent, { borrow: Boolean(req.sourceDir) });
+  if (toolchain.borrowed) log(`Using the cached ${toolchain.version} toolchain at ${toolchain.binDir} (this tree's own tools/ does not run here).`);
+
+  const makeVars: Record<string, string> = req.configErase ? { FLASH_CONFIG_ERASE: "yes" } : {};
+  log(`Probing ${req.target} options with arm-none-eabi-gcc ${toolchain.version} -E…`);
+  const ctx = { sourceDir: source.dir, target: req.target, binDir: toolchain.binDir, extraMakeVars: makeVars };
+  let lastPct = -1;
+  const probe = await probeOptions(ctx, (done, total) => {
+    const pct = Math.floor((done / total) * 10) * 10;
+    if (pct !== lastPct) emit("progress", { done, total }), (lastPct = pct);
+    step("Probing options with the preprocessor", done, total);
+  });
+  log(`Probed ${probe.options.length} options in ${(probe.durationMs / 1000).toFixed(1)}s.`);
+
+  session = {
+    ref: req.ref,
+    commit: source.commit,
+    sourceDir: source.dir,
+    local: Boolean(req.sourceDir),
+    ...(origin ? { origin } : {}),
+    target: req.target,
+    makeVars,
+    pp: await TargetPreprocessor.create(ctx),
+    // Re-read each load so edits to the data file show up without a restart.
+    probe: { ...probe, options: annotateOptions(await loadOptionInfo(OPTION_INFO), probe) },
+    binDir: toolchain.binDir,
+    sizes: probe.flashKb ? { flashKb: probe.flashKb } : {},
+  };
+  step("Reading the official release size");
+  try {
+    // A release source, or a local tree whose HEAD is exactly a release tag.
+    let tag = session.local ? "" : req.ref;
+    if (session.local) {
+      tag = (await git(source.dir, ["tag", "--points-at", "HEAD"])).split("\n").find((t) => /^(release|snapshot)\//.test(t)) ?? "";
+      if (tag) {
+        session.sizes.modifiedFromTag = (await git(source.dir, ["diff", "--shortstat", "HEAD", "--", "src", "make", "Makefile"])) !== "";
+      } else {
+        const version = await treeVersion(source.dir);
+        const near = version ? await nearestRelease(version) : undefined;
+        const nearest = near ? await releaseHexSize(near, req.target) : null;
+        if (nearest) session.sizes.nearest = nearest;
+      }
+    }
+    const official = tag ? await releaseHexSize(tag, req.target) : null;
+    if (official) {
+      session.sizes.official = official;
+      log(`Official ${official.asset}: ${official.flash.toLocaleString()} bytes of flash${session.local ? ` (this tree is at ${tag}${session.sizes.modifiedFromTag ? ", with local edits" : ""})` : ""}.`);
+    }
+  } catch (err) {
+    log(`Official release size unavailable: ${err}`, "stderr");
+  }
+  const records = await readBaselines();
+  const known = records[baselineKey(session)];
+  // A local tree moves on with every commit: its last baseline build is a far
+  // better reference than any release, and its ELF still drives the estimates.
+  const [, prevKey] = session.local && !known ? latestBaselineOfTree(records, session) : [];
+  if (known) {
+    session.sizes.baseline = { ...known, source: "build" };
+    await attachModel(session).catch((err) => log(`Size model unavailable: ${err}`, "stderr"));
+  } else if (prevKey) {
+    session.sizes.baseline = { ...records[prevKey]!, source: "previous", commit: prevKey.split("|")[0] };
+    log(`Using this tree's last baseline build (commit ${prevKey.split("|")[0]!.slice(0, 9)}) until it is rebuilt at ${session.commit.slice(0, 9)}.`);
+    await attachModel(session).catch((err) => log(`Size model unavailable: ${err}`, "stderr"));
+  } else if (session.sizes.official) {
+    session.sizes.baseline = officialBaseline(session.sizes.official, makeVars);
+  } else if (session.sizes.nearest) {
+    // Approximate until the tree's own baseline is built: good enough for the budget bar.
+    session.sizes.baseline = { ...officialBaseline(session.sizes.nearest, makeVars), source: "nearest" };
+  }
+  // Region sizes are fixed per target: borrow them from any earlier build of it.
+  const withRegions = Object.entries(records).find(([k, r]) => k.split("|")[1] === req.target && r.memory?.length);
+  if (withRegions) session.sizes.capacity = withRegions[1].memory!.map((m) => ({ ...m, used: 0 }));
+  emit("session", publicSession());
+}
+
+async function build(sel: Selection) {
+  const s = session!;
+  const options = selectionOptions(sel, guardMap(s.probe));
+  if (s.origin) {
+    // Pick up edits made in the user's own folder since the last build.
+    step("Syncing changes from your folder");
+    const m = await syncMirror(s.origin);
+    if (m.changed.length) {
+      log(`Synced ${m.changed.length} changed file(s) from ${s.origin}: ${m.changed.slice(0, 8).join(", ")}${m.changed.length > 8 ? " …" : ""}`);
+      s.staleFiles = [...new Set([...(s.staleFiles ?? []), ...m.changed])];
+      emit("session", publicSession());
+    }
+  }
+  log(`Building ${s.target} with OPTIONS="${options.join(" ")}"…`);
+  const totalKey = `${s.sourceDir}|${s.target}`;
+  let compiled = 0;
+  const at = new Date().toISOString();
+  try {
+    const r = await buildFirmware({
+      target: s.target,
+      ref: s.ref,
+      sourceDir: s.sourceDir,
+      sourceAsIs: true,
+      extraOptions: options,
+      extraMakeVars: s.makeVars,
+      outputDir: join(DEFAULT_OUTPUT_DIR, `${s.target}-${at.replace(/[:.]/g, "-")}`),
+      onEvent: (e) => {
+        log(e.line, e.stream);
+        // The firmware Makefile prints "%% file.c" per compiled file.
+        if (e.line.startsWith("%% ")) {
+          compiled++;
+          step("Compiling", compiled, compileTotals.get(totalKey));
+        } else if (/^Linking /.test(e.line)) step("Linking");
+      },
+      onStage: (stage) => {
+        log(`[${stage}]`);
+        const label: Record<string, string> = {
+          "resolving-source": "Preparing source",
+          "installing-toolchain": "Checking toolchain",
+          "compiling": "Compiling",
+          "collecting-artifacts": "Collecting artifacts",
+        };
+        step(label[stage] ?? stage);
+      },
+    });
+    if (compiled > 50) compileTotals.set(totalKey, compiled);
+    history.push({
+      at,
+      target: s.target,
+      commit: r.commit,
+      options,
+      ok: true,
+      makeVars: s.makeVars,
+      source: s.local ? s.origin ?? s.sourceDir : s.ref,
+      ...r.size,
+      hexPath: r.hexPath,
+      durationMs: r.durationMs,
+    });
+    if (!options.length && r.size) {
+      const rec: BaselineRecord = {
+        flash: r.size.flash,
+        ram: r.size.data + r.size.bss,
+        source: "build",
+        ...(r.memory ? { memory: r.memory } : {}),
+        ...(r.elfPath ? { elfPath: r.elfPath } : {}),
+        at,
+      };
+      s.sizes.baseline = rec;
+      await saveBaseline(s, rec);
+      await attachModel(s).catch((err) => log(`Size model unavailable: ${err}`, "stderr"));
+      emit("session", publicSession());
+    }
+  } catch (err) {
+    history.push({
+      at,
+      target: s.target,
+      commit: s.commit,
+      options,
+      ok: false,
+      error: isBuildToolError(err) ? err.message : String(err),
+      durationMs: Date.now() - Date.parse(at),
+    });
+    throw err;
+  } finally {
+    saveHistory();
+    emit("history", history);
+  }
+}
+
+function publicSession() {
+  if (!session) return null;
+  const { pp: _pp, model: _model, ...rest } = session;
+  return rest;
+}
+
+function validSelection(body: unknown): Selection | undefined {
+  const b = body as Partial<Selection> | null;
+  const ok = (v: unknown): v is string[] =>
+    Array.isArray(v) && v.every((x) => typeof x === "string" && /^USE_[A-Z0-9_]+$/.test(x));
+  if (!b || !ok(b.add) || !ok(b.remove) || !session) return undefined;
+  const byName = new Map(session.probe.options.map((o) => [o.name, o.state]));
+  if (!b.add.every((n) => byName.get(n) === "off-addable")) return undefined;
+  if (!b.remove.every((n) => byName.get(n) === "on-removable")) return undefined;
+  return { add: b.add, remove: b.remove };
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  let body = "";
+  for await (const chunk of req) body += chunk;
+  return body ? JSON.parse(body) : {};
+}
+
+function send(res: ServerResponse, status: number, data: unknown) {
+  res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(data));
+}
+
+async function handle(req: IncomingMessage, res: ServerResponse) {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const route = `${req.method} ${url.pathname}`;
+
+  switch (route) {
+    case "GET /":
+      // Never cache the app: a stale tab would run old flashing code.
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(await readFile(PAGE));
+      return;
+
+    case "GET /assets/rotorflight-logo.svg":
+    case "GET /assets/rotorflight-logo-compact.svg":
+      // The Rotorflight logo, from the Configurator (white + Rotorflight blue, for the dark header bar).
+      res.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "max-age=86400" });
+      res.end(await readFile(join(ROOT, "app", url.pathname.slice(1))));
+      return;
+
+    case "GET /flasher.js":
+      res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
+      res.end(await readFile(join(ROOT, "app", "flasher.js")));
+      return;
+
+    case "GET /api/events":
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+      res.write(": connected\n\n");
+      clients.add(res);
+      req.on("close", () => clients.delete(res));
+      return;
+
+    case "GET /api/state":
+      return send(res, 200, {
+        busy: busy ?? null,
+        job,
+        log: logTail,
+        session: publicSession(),
+        history,
+        targets: KNOWN_UNIFIED_TARGETS,
+      });
+
+    case "GET /api/targets": {
+      // MCU targets for a ref, read from its checkout when one is already on disk.
+      const ref = url.searchParams.get("ref") ?? "";
+      const dir = url.searchParams.get("sourceDir") || (ref ? cachedSourcePath(ref) : "");
+      const fromSource = Boolean(dir) && existsSync(join(dir, "src", "main", "target"));
+      const targets = fromSource ? await validTargetsFromSource(dir) : [...KNOWN_UNIFIED_TARGETS];
+      return send(res, 200, { targets, fromSource });
+    }
+
+    case "GET /api/releases":
+      return send(res, 200, { releases: await listReleases() });
+
+    case "GET /api/release-size": {
+      const tag = url.searchParams.get("tag") ?? "";
+      const target = url.searchParams.get("target") ?? "";
+      if (!tag || !/^[A-Z0-9_]+$/.test(target)) return send(res, 400, { error: "tag and target required" });
+      return send(res, 200, { size: await releaseHexSize(tag, target) });
+    }
+
+    case "GET /api/dirs":
+      return send(res, 200, await listDirs(url.searchParams.get("path") ?? ""));
+
+    case "GET /api/flash-image": {
+      // The exact bytes to flash: the build's hex with the board config inserted,
+      // as the Configurator would do it.
+      const i = Number(url.searchParams.get("i"));
+      const entry = history[i];
+      if (!entry?.ok || !entry.hexPath || !existsSync(entry.hexPath)) return send(res, 404, { error: "no such build" });
+      const image = parseHex(await readFile(entry.hexPath, "utf8"));
+      const key = url.searchParams.get("board") ?? "";
+      let configInserted = false;
+      if (key) {
+        const cfg = await boardConfig(key);
+        if (!cfg) return send(res, 400, { error: `Unknown board ${key}.` });
+        if (cfg.target && cfg.target !== entry.target) {
+          return send(res, 409, { error: `${key} is an ${cfg.target} board, but this build is for ${entry.target}. Refusing to flash.` });
+        }
+        const text = prepareBoardConfig(cfg.raw, {
+          fileName: cfg.board.path.split("/").pop()!,
+          boardKey: key,
+          manufacturer: cfg.board.manufacturer,
+          commitHash: cfg.commitHash,
+          date: cfg.date,
+        });
+        configInserted = insertConfig(image, text);
+      }
+      return send(res, 200, {
+        index: i,
+        target: entry.target,
+        board: key || null,
+        configInserted,
+        options: entry.options,
+        makeVars: entry.makeVars ?? {},
+        source: entry.source ?? "",
+        bytesTotal: image.bytesTotal,
+        blocks: image.blocks.map((b) => ({ address: b.address, data: Buffer.from(b.data).toString("base64") })),
+      });
+    }
+
+    case "GET /api/hex": {
+      // Download a built .hex by its history index, to load into the Configurator.
+      const entry = history[Number(url.searchParams.get("i"))];
+      if (!entry?.ok || !entry.hexPath || !existsSync(entry.hexPath)) return send(res, 404, { error: "no such build" });
+      const suffix = entry.options.length
+        ? `_custom-${entry.at.slice(0, 19).replace(/[-:T]/g, "")}`
+        : "_baseline";
+      const name = entry.hexPath.split("/").pop()!.replace(/\.hex$/, `${suffix}.hex`);
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-disposition": `attachment; filename="${name}"`,
+      });
+      res.end(await readFile(entry.hexPath));
+      return;
+    }
+
+    case "GET /api/option-info": {
+      const { levels, features } = await loadOptionInfo(OPTION_INFO);
+      return send(res, 200, { levels, features });
+    }
+
+    case "GET /api/boards":
+      return send(res, 200, { boards: await listBoards() });
+
+    case "GET /api/board-target": {
+      const key = url.searchParams.get("key") ?? "";
+      return send(res, 200, { key, target: (await boardTarget(key)) ?? null });
+    }
+
+    case "POST /api/load": {
+      const body = (await readJson(req)) as Partial<LoadRequest>;
+      if (typeof body.target !== "string" || typeof body.ref !== "string" || !body.ref.trim()) {
+        return send(res, 400, { error: "target and ref are required" });
+      }
+      const what = typeof body.sourceDir === "string" && body.sourceDir.trim() ? body.sourceDir.trim() : body.ref!.trim();
+      const started = startJob("load", `Loading ${what} for ${body.target}`, () =>
+        load({
+          target: body.target!,
+          ref: body.ref!.trim(),
+          sourceDir: typeof body.sourceDir === "string" && body.sourceDir.trim() ? normalisePath(body.sourceDir) : undefined,
+          configErase: Boolean(body.configErase),
+        }),
+      );
+      return send(res, started ? 202 : 409, started ? { ok: true } : { error: `busy: ${busy}` });
+    }
+
+    case "POST /api/preview": {
+      const sel = validSelection(await readJson(req));
+      if (!sel) return send(res, 400, { error: "invalid selection for the loaded target" });
+      const preview = await previewSelection(session!.pp, session!.probe.baseline, sel, guardMap(session!.probe));
+      const estimate = session!.model ? estimateRemoval(session!.model, preview.removed) : undefined;
+      return send(res, 200, { ...preview, ...(estimate ? { estimate } : {}) });
+    }
+
+    case "POST /api/delete-build": {
+      // Identified by timestamp, not index: indices shift as builds come and go.
+      const { at } = (await readJson(req)) as { at?: string };
+      const i = history.findIndex((h) => h.at === at);
+      if (i < 0) return send(res, 404, { error: "no such build" });
+      if (busy === "build" && i === history.length - 1) return send(res, 409, { error: "that build is still running" });
+      const [entry] = history.splice(i, 1);
+      const removed: string[] = [];
+      // Only ever delete the app's own output folder for this build.
+      const dir = entry!.hexPath ? dirname(entry!.hexPath) : "";
+      if (dir && dir.startsWith(DEFAULT_OUTPUT_DIR) && existsSync(dir)) {
+        await rm(dir, { recursive: true, force: true });
+        removed.push(dir);
+      }
+      // A deleted baseline build takes its ELF with it: forget the measured baseline.
+      const records = await readBaselines();
+      const stale = Object.keys(records).filter((k) => records[k]!.elfPath && dir && records[k]!.elfPath!.startsWith(dir));
+      if (stale.length) {
+        for (const k of stale) delete records[k];
+        await writeFile(SIZES_FILE(), JSON.stringify(records, null, 2));
+        if (session && session.sizes.baseline?.elfPath?.startsWith(dir)) {
+          session.model = undefined;
+          session.sizes.located = undefined;
+          session.sizes.baseline = session.sizes.official
+            ? officialBaseline(session.sizes.official, session.makeVars)
+            : session.sizes.nearest
+              ? { ...officialBaseline(session.sizes.nearest, session.makeVars), source: "nearest" }
+              : undefined;
+          emit("session", publicSession());
+        }
+      }
+      log(`Deleted build ${entry!.options.join(" ") || "baseline"} (${entry!.target})${removed.length ? `, removed ${removed[0]}` : ""}.`);
+      saveHistory();
+      emit("history", history);
+      return send(res, 200, { ok: true, baselineForgotten: stale.length > 0 });
+    }
+
+    case "POST /api/build": {
+      const sel = validSelection(await readJson(req));
+      if (!sel) return send(res, 400, { error: "invalid selection for the loaded target" });
+      const n = sel.add.length + sel.remove.length;
+      const started = startJob("build", `Building ${session!.target}${n ? ` with ${n} change${n > 1 ? "s" : ""}` : " baseline"}`, () => build(sel));
+      return send(res, started ? 202 : 409, started ? { ok: true } : { error: `busy: ${busy}` });
+    }
+  }
+  send(res, 404, { error: "not found" });
+}
+
+const { values } = parseArgs({
+  args: process.argv.slice(2),
+  options: {
+    port: { type: "string", default: "4780" },
+    host: { type: "string", default: "127.0.0.1" },
+  },
+});
+
+if (process.platform === "win32" && !process.env.RFB_NO_WSL) {
+  relaunchInWsl();
+} else {
+  createServer((req, res) => {
+    handle(req, res).catch((err) => {
+      if (!res.headersSent) send(res, 500, { error: String(err) });
+      else res.end();
+    });
+  })
+    .on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code !== "EADDRINUSE") throw err;
+      process.stderr.write(
+        `Port ${values.port} is already in use — the app is probably already running.\n` +
+          `Open http://localhost:${values.port}, or start another with --port <n>.\n`,
+      );
+      process.exit(1);
+    })
+    .listen(Number(values.port), values.host, () => {
+      process.stdout.write(`Rotorflight build sample app: http://localhost:${values.port}\n`);
+    });
+}
+
+/**
+ * The firmware Makefile needs a POSIX environment, so on Windows hand off to
+ * WSL (whose localhost is forwarded to the Windows browser). WSL's Node 22 does
+ * not strip TypeScript, so the compiled dist/ copy is what runs there.
+ */
+function relaunchInWsl() {
+  const root = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
+  const wslRoot = spawnSync("wsl", ["-e", "wslpath", "-a", root.replace(/\\/g, "/")], {
+    encoding: "utf8",
+  });
+  if (wslRoot.status !== 0) {
+    process.stderr.write(
+      "This app must run where the firmware builds (WSL on Windows), but `wsl` failed.\n" +
+        "Set RFB_NO_WSL=1 to run natively anyway (builds will fail without make).\n",
+    );
+    process.exit(1);
+  }
+  const dir = wslRoot.stdout.trim();
+  const script = `cd ${shQuote(dir)} && exec node dist/app/server.js --port ${Number(values.port)} --host ${shQuote(values.host!)}`;
+  process.stdout.write("Windows detected: starting the app inside WSL…\n");
+  const child = spawn("wsl", ["-e", "bash", "-lc", script], { stdio: "inherit" });
+  child.on("exit", (code) => process.exit(code ?? 1));
+}
+
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}

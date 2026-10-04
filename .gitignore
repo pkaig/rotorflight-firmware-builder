@@ -1,0 +1,8 @@
+node_modules/
+dist/
+output/
+*.tsbuildinfo
+.DS_Store
+
+# Local build/toolchain/source cache (override with RFB_CACHE_DIR)
+.cache/

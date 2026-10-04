@@ -1,0 +1,1675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rotorflight Firmware Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Theme: the Rotorflight Configurator's Svelte design tokens (src/css/app.css,
+     src/css/main.css), so this app reads as part of the same suite. Dark is the
+     default; html[data-theme="light"] switches to the Configurator's light set. */
+  :root {
+    --animation-speed: 0.16s cubic-bezier(0.4, 0, 0.2, 1);
+    --radius-xs: 4px; --radius-sm: 6px; --radius-md: 10px; --radius-lg: 14px; --radius-pill: 999px;
+    --font-ui: "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    /* The header bar is dark in both themes, as in the Configurator. */
+    --chrome-bg: hsl(208, 11%, 9%);
+    --chrome-bg-raised: hsl(208, 11%, 14%);
+    --chrome-bg-sunken: hsl(208, 11%, 6%);
+    --chrome-fg: hsl(208, 14%, 88%);
+    --chrome-fg-muted: hsl(208, 8%, 62%);
+    --chrome-border: hsl(208, 10%, 19%);
+    --chrome-hover: rgba(255, 255, 255, 0.07);
+    --chrome-accent: hsl(203, 100%, 39%);
+    --chrome-accent-hover: hsl(203, 100%, 33%);
+  }
+  html, html[data-theme="dark"] {
+    --val-neutral-hue: 208; --val-neutral-sat: 9%; --val-accent-hue: 203; --val-accent-sat: 82%;
+    --color-accent-300: hsl(203, 82%, 30%); --color-accent-400: hsl(203, 82%, 50%); --color-accent-500: hsl(203, 82%, 58%);
+    --color-accent-600: hsl(203, 82%, 66%); --color-accent-700: hsl(203, 82%, 74%);
+    --color-neutral-950: hsl(208, 9%, 7%); --color-neutral-900: hsl(208, 9%, 11%); --color-neutral-800: hsl(208, 9%, 16%);
+    --color-neutral-700: hsl(208, 9%, 22%); --color-neutral-600: hsl(208, 9%, 32%); --color-neutral-500: hsl(208, 9%, 45%);
+    --color-neutral-400: hsl(208, 9%, 58%); --color-neutral-300: hsl(208, 9%, 70%); --color-neutral-200: hsl(208, 9%, 82%);
+    --color-neutral-100: hsl(208, 9%, 90%); --color-neutral-50: hsl(208, 9%, 96%);
+    --color-bg: var(--color-neutral-950); --color-surface: var(--color-neutral-900); --color-surface-float: var(--color-neutral-800);
+    --color-surface-sunken: var(--color-neutral-950); --color-hover: var(--color-neutral-800);
+    --color-border: var(--color-neutral-700); --color-border-soft: var(--color-neutral-700); --color-border-card: var(--color-neutral-800);
+    --color-border-accent: var(--color-accent-400);
+    --color-header-bg: var(--color-neutral-800); --color-header-fg: var(--color-neutral-100);
+    --color-text: var(--color-neutral-50); --color-text-muted: var(--color-neutral-300); --color-text-disabled: var(--color-neutral-400);
+    --color-input-bg: var(--color-neutral-800); --color-input-bg-disabled: var(--color-neutral-700);
+    --color-btn-fg: var(--color-neutral-900); --color-btn-fg-disabled: var(--color-neutral-700);
+    --color-btn-bg: var(--color-neutral-200); --color-btn-bg-hover: var(--color-neutral-400);
+    --color-btn-bg-active: var(--color-neutral-500); --color-btn-bg-disabled: var(--color-neutral-400);
+    --color-accent: var(--color-accent-500); --color-accent-fg: hsl(208, 20%, 8%); --color-accent-hover: var(--color-accent-600);
+    --color-accent-text: var(--color-accent-600);
+    --color-accent-soft: hsl(203 82% 58% / 0.16); --color-focus-ring: hsl(203 82% 58% / 0.35);
+    --color-switch: var(--color-accent-400); --color-switch-secondary: var(--color-neutral-600);
+    --color-switch-disabled: var(--color-neutral-700); --color-switch-disabled-checked: hsl(203, 20%, 30%);
+    --color-switch-handle: var(--color-neutral-50); --color-switch-handle-disabled: var(--color-neutral-500);
+    --color-meter-bg: var(--color-neutral-700); --color-meter-border: var(--color-neutral-500);
+    --color-info: var(--color-accent-700); --color-info-soft: hsl(203, 40%, 18%);
+    --color-success: hsl(145, 50%, 60%); --color-success-soft: hsl(145, 35%, 16%);
+    --color-warning: hsl(45, 90%, 62%); --color-warning-soft: hsl(42, 45%, 16%);
+    --color-danger: hsl(4, 85%, 68%); --color-danger-soft: hsl(4, 45%, 18%);
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 8px -2px rgba(0, 0, 0, 0.5), 0 18px 40px -12px rgba(0, 0, 0, 0.7);
+    --scroll-thumb: var(--color-neutral-700); --scroll-thumb-hover: var(--color-neutral-600);
+    color-scheme: dark;
+  }
+  html[data-theme="light"] {
+    --color-accent-300: hsl(203, 100%, 26%); --color-accent-400: hsl(203, 100%, 32%); --color-accent-500: hsl(203, 100%, 39%);
+    --color-accent-600: hsl(203, 100%, 50%); --color-accent-700: hsl(203, 100%, 64%);
+    --color-neutral-950: hsl(208, 9%, 4%); --color-neutral-900: hsl(208, 9%, 8%); --color-neutral-800: hsl(208, 9%, 13%);
+    --color-neutral-700: hsl(208, 9%, 22%); --color-neutral-600: hsl(208, 9%, 36%); --color-neutral-500: hsl(208, 9%, 55%);
+    --color-neutral-400: hsl(208, 9%, 76%); --color-neutral-300: hsl(208, 9%, 90%); --color-neutral-200: hsl(208, 9%, 95%);
+    --color-neutral-100: hsl(208, 9%, 98%); --color-neutral-50: hsl(208, 9%, 100%);
+    --color-bg: var(--color-neutral-200); --color-surface: var(--color-neutral-50); --color-surface-float: var(--color-neutral-50);
+    --color-surface-sunken: var(--color-neutral-100); --color-hover: var(--color-neutral-200);
+    --color-border: var(--color-neutral-400); --color-border-soft: var(--color-neutral-300); --color-border-card: var(--color-neutral-300);
+    --color-border-accent: var(--color-accent-500);
+    --color-header-bg: var(--color-neutral-100); --color-header-fg: var(--color-neutral-700);
+    --color-text: var(--color-neutral-900); --color-text-muted: var(--color-neutral-600); --color-text-disabled: var(--color-neutral-500);
+    --color-input-bg: var(--color-neutral-50); --color-input-bg-disabled: var(--color-neutral-200);
+    --color-btn-fg: var(--color-neutral-800); --color-btn-fg-disabled: var(--color-neutral-500);
+    --color-btn-bg: var(--color-neutral-300); --color-btn-bg-hover: var(--color-neutral-400);
+    --color-btn-bg-active: var(--color-neutral-500); --color-btn-bg-disabled: var(--color-neutral-200);
+    --color-accent: var(--color-accent-500); --color-accent-fg: hsl(0, 0%, 100%); --color-accent-hover: var(--color-accent-400);
+    --color-accent-text: var(--color-accent-400);
+    --color-accent-soft: hsl(203 100% 39% / 0.1); --color-focus-ring: hsl(203 100% 39% / 0.28);
+    --color-switch: var(--color-accent-500); --color-switch-secondary: var(--color-neutral-400);
+    --color-switch-disabled: var(--color-neutral-300); --color-switch-disabled-checked: hsl(203, 20%, 50%);
+    --color-switch-handle: var(--color-neutral-50); --color-switch-handle-disabled: var(--color-neutral-400);
+    --color-meter-bg: var(--color-neutral-200); --color-meter-border: var(--color-neutral-400);
+    --color-info: var(--color-accent-300); --color-info-soft: hsl(203, 80%, 95%);
+    --color-success: hsl(145, 63%, 26%); --color-success-soft: hsl(145, 60%, 93%);
+    --color-warning: hsl(36, 100%, 26%); --color-warning-soft: hsl(48, 100%, 91%);
+    --color-danger: hsl(4, 76%, 44%); --color-danger-soft: hsl(4, 100%, 95%);
+    --shadow-xs: 0 1px 2px rgba(15, 18, 24, 0.06);
+    --shadow-lg: 0 4px 8px -2px rgba(15, 18, 24, 0.08), 0 18px 40px -12px rgba(15, 18, 24, 0.2);
+    --scroll-thumb: var(--color-neutral-400); --scroll-thumb-hover: var(--color-neutral-500);
+    color-scheme: light;
+  }
+  /* Short aliases the app's markup and scripts already use. */
+  html {
+    --bg: var(--color-bg); --panel: var(--color-surface); --ink: var(--color-text); --muted: var(--color-text-muted);
+    --line: var(--color-border-soft); --accent: var(--color-accent); --accent-soft: var(--color-accent-soft);
+    --on: var(--color-success); --off: var(--color-neutral-600);
+    --add: var(--color-info); --add-soft: var(--color-info-soft); --del: var(--color-danger); --del-soft: var(--color-danger-soft);
+    --mono: var(--font-mono);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--color-bg); color: var(--color-text); font: 12.5px/1.45 var(--font-ui);
+         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); border: 3px solid transparent; background-clip: content-box;
+                              background-color: var(--scroll-thumb); }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--scroll-thumb-hover); }
+  a { color: var(--color-accent-text); }
+  code, .mono { font-family: var(--font-mono); font-size: 11.5px; }
+  .muted { color: var(--color-text-muted); font-size: 12px; }
+
+  /* Controls (the Configurator's .svelte input/select rules). */
+  input[type=text], select {
+    font: 12px var(--font-ui); height: 28px; padding: 0 8px; border-radius: var(--radius-sm);
+    color: var(--color-text); background: var(--color-input-bg); border: 1px solid var(--color-border-soft);
+    transition: border-color var(--animation-speed), box-shadow var(--animation-speed);
+  }
+  input[type=text]:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--color-border); }
+  input[type=text]:focus, select:focus { outline: none; border-color: var(--color-border-accent); box-shadow: 0 0 0 3px var(--color-focus-ring); }
+  input::placeholder { color: var(--color-text-disabled); }
+  select {
+    min-width: 120px; padding-right: 26px; cursor: pointer; -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5L6 8l3.5-3.5' fill='none' stroke='%238a8f98' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center; background-size: 12px 12px;
+  }
+  input[type=checkbox] { accent-color: var(--color-accent); }
+  button {
+    font: 600 12px var(--font-ui); height: 28px; padding: 0 12px; border-radius: var(--radius-sm); border: 1px solid transparent;
+    background: var(--color-btn-bg); color: var(--color-btn-fg); cursor: pointer; white-space: nowrap;
+    transition: background-color var(--animation-speed), color var(--animation-speed), box-shadow var(--animation-speed);
+  }
+  button:hover:not(:disabled) { background: var(--color-btn-bg-hover); }
+  button:active:not(:disabled) { background: var(--color-btn-bg-active); }
+  button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--color-focus-ring); }
+  button.primary { background: var(--color-accent); color: var(--color-accent-fg); }
+  button.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+  button:disabled { background: var(--color-btn-bg-disabled); color: var(--color-btn-fg-disabled); cursor: not-allowed; }
+  button.primary:disabled { background: var(--color-accent-soft); color: var(--color-text-disabled); }
+
+  /* Header bar ("chrome"): dark in both themes, with the Rotorflight logo. */
+  header {
+    display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; padding: 10px 16px 12px;
+    background: var(--chrome-bg); color: var(--chrome-fg); border-bottom: 1px solid var(--chrome-border);
+  }
+  header .brand { display: flex; align-items: center; gap: 12px; flex-basis: 100%; }
+  header .logo { height: 26px; width: auto; display: block; }
+  header .appname { font-size: 14px; font-weight: 600; color: var(--chrome-fg); letter-spacing: .01em;
+                    padding-left: 12px; border-left: 1px solid var(--chrome-border); }
+  header .brand .spacer { flex: 1; }
+  .logotext { font-weight: 700; font-size: 17px; letter-spacing: .08em; color: #fff; }
+  .logotext b { color: var(--chrome-accent); font-weight: 700; }
+  header label.f, header .f { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 600;
+                              color: var(--chrome-fg-muted); letter-spacing: .02em; }
+  header input[type=text], header select { background-color: var(--chrome-bg-sunken); border-color: var(--chrome-border); color: var(--chrome-fg); }
+  header input[type=text]:hover, header select:hover { border-color: hsl(208, 10%, 30%); }
+  header button:not(.primary):not(.icon) { background: var(--chrome-bg-raised); color: var(--chrome-fg); border-color: var(--chrome-border); }
+  header button:not(.primary):not(.icon):hover:not(:disabled) { background: hsl(208, 11%, 22%); }
+  header button.primary { background: var(--chrome-accent); color: #fff; }
+  header button.primary:hover:not(:disabled) { background: var(--chrome-accent-hover); }
+  header button.primary:disabled { background: hsl(203, 30%, 22%); color: var(--chrome-fg-muted); }
+  header .muted, header .inline { color: var(--chrome-fg-muted); }
+  button.icon { background: transparent; color: var(--chrome-fg-muted); width: 32px; padding: 0; font-size: 15px; }
+  button.icon:hover:not(:disabled) { background: var(--chrome-hover); color: var(--chrome-fg); }
+  .status { font-size: 11.5px; color: var(--chrome-fg-muted); font-weight: 400; }
+  .status b { color: var(--color-accent-600); font-weight: 600; }
+  .boardrow { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end;
+              padding: 10px 0; border-top: 1px solid var(--chrome-border); border-bottom: 1px solid var(--chrome-border); }
+  #boardstatus { align-self: center; font-size: 12px; color: var(--chrome-fg-muted); }
+  #boardstatus b { color: var(--chrome-fg); }
+  #boardstatus .warn { color: var(--color-danger); }
+  .source { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 10px; }
+  .source > .f { flex-basis: 100%; }
+  .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--radius-pill); background: var(--chrome-bg-sunken);
+         border: 1px solid var(--chrome-border); }
+  .seg label { padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: var(--radius-pill);
+               color: var(--chrome-fg-muted); transition: background-color var(--animation-speed), color var(--animation-speed); }
+  .seg label:hover { color: var(--chrome-fg); background: var(--chrome-hover); }
+  .seg label:has(input:checked) { background: var(--chrome-accent); color: #fff; }
+  .seg label:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .srcpane { display: flex; align-items: center; gap: 8px; }
+  .srcpane[hidden] { display: none; }
+  .inline { font-size: 12px; color: var(--color-text-muted); display: inline-flex; gap: 4px; align-items: center; }
+  .inline b { color: var(--chrome-fg); }
+  .loadwrap { display: flex; flex-direction: column; gap: 3px; }
+  #loadNote { font-size: 11px; max-width: 260px; color: var(--color-warning); }
+  #load.attention { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+
+  /* Job banner: what is loading/building right now. */
+  .banner { position: sticky; top: 0; z-index: 5; background: var(--color-surface-float); padding: 10px 16px 0;
+            box-shadow: inset 4px 0 0 var(--color-accent), var(--shadow-lg); border-bottom: 1px solid var(--color-border); }
+  .bannerrow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; padding-bottom: 8px; }
+  #jobTitle { color: var(--color-accent-text); }
+  #jobStep { color: var(--color-text); }
+  #jobTime { color: var(--color-text-muted); font-family: var(--font-mono); font-size: 12px; margin-left: auto; }
+  .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--color-accent); border-right-color: transparent;
+             animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .track { height: 4px; margin: 0 -16px; background: var(--color-meter-bg); overflow: hidden; position: relative; }
+  .track .fill { height: 100%; background: var(--color-accent); width: 0; transition: width .3s; }
+  .track.indeterminate .fill { width: 30%; position: absolute; animation: slide 1.4s ease-in-out infinite; }
+  @keyframes slide { from { left: -30%; } to { left: 100%; } }
+
+  /* Layout + cards (the Configurator's Section: a header band on a rounded card). */
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 16px; padding: 16px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } .side { position: static; max-height: none; } }
+  .left { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 16px; align-self: start;
+          max-height: calc(100vh - 32px); overflow: auto; }
+  .panel { background: var(--color-surface); border: 1px solid var(--color-border-card); border-radius: var(--radius-md);
+           padding: 0 12px 12px; box-shadow: var(--shadow-xs); min-width: 0; }
+  .panel > h2, .panel > .setuphead, .panel > summary {
+    display: flex; align-items: center; gap: 8px; min-height: 38px; margin: 0 -12px 10px; padding: 0 12px;
+    font-size: 13px; font-weight: 600; letter-spacing: .01em; color: var(--color-header-fg);
+    background: var(--color-header-bg); border-bottom: 1px solid var(--color-border-soft);
+    border-radius: calc(var(--radius-md) - 1px) calc(var(--radius-md) - 1px) 0 0;
+  }
+  .panel h2 { font-size: 13px; font-weight: 600; margin: 0; }
+  .setuphead { flex-wrap: wrap; }
+  .setuphead .muted { font-weight: 400; font-size: 11.5px; }
+  .collapsible > summary { list-style: none; cursor: pointer; user-select: none; }
+  .collapsible > summary::-webkit-details-marker { display: none; }
+  .collapsible > summary::before { content: "▸"; color: var(--color-text-muted); font-size: 11px; transition: transform var(--animation-speed); }
+  .collapsible[open] > summary::before { transform: rotate(90deg); }
+  .collapsible:not([open]) { padding-bottom: 0; }
+  .collapsible:not([open]) > summary { margin-bottom: 0; border-bottom: 0; border-radius: calc(var(--radius-md) - 1px); }
+  .collapsible > summary:hover { background: var(--color-hover); }
+  .collapsible > summary:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--color-focus-ring); }
+  .count { font-weight: 400; color: var(--color-text-muted); }
+
+  /* Option list. */
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  .tools input[type=text] { flex: 1; min-width: 160px; }
+  .chip { height: 24px; font-size: 11.5px; padding: 0 10px; border-radius: var(--radius-pill); border: 1px solid var(--color-border-soft);
+          background: var(--color-input-bg); color: var(--color-text); font-weight: 600; }
+  .chip[aria-pressed=true] { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-accent-text); }
+  .group h3 { font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--color-text-muted); margin: 14px 0 4px;
+              padding: 4px 8px; background: var(--color-surface-sunken); border-radius: var(--radius-xs);
+              box-shadow: inset 3px 0 0 var(--color-neutral-600); }
+  .row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 10px; align-items: center; cursor: pointer;
+         padding: 6px 8px; border-radius: var(--radius-sm); transition: background-color var(--animation-speed); }
+  .row:hover { background: var(--color-hover); }
+  .row.locked { opacity: .5; }
+  .row.changed { background: var(--color-accent-soft); box-shadow: inset 3px 0 0 var(--color-accent); opacity: 1; }
+  .row.selected { box-shadow: inset 0 0 0 1px var(--color-border-accent), inset 3px 0 0 var(--color-accent); }
+  .name { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+  .title { font: 12px var(--font-ui); color: var(--color-text-muted); margin-left: 8px; }
+  .reason { font-size: 11.5px; color: var(--color-text-muted); }
+  .empty { padding: 40px; text-align: center; color: var(--color-text-muted); }
+  .stale { opacity: .35; pointer-events: none; filter: grayscale(1); }
+
+  /* Switch (the Configurator's 44×20 pill). */
+  .sw { position: relative; width: 44px; height: 20px; }
+  .sw input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; position: relative; z-index: 1; }
+  .sw input:disabled { cursor: not-allowed; }
+  .sw span { position: absolute; inset: 0; border-radius: var(--radius-pill); background: var(--color-switch-secondary);
+             transition: background-color var(--animation-speed); }
+  .sw span::after { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%;
+                    background: var(--color-switch-handle); transition: transform .28s cubic-bezier(.34, 1.56, .64, 1); }
+  .sw input:checked + span { background: var(--color-switch); }
+  .sw input:checked + span::after { transform: translateX(24px); }
+  .sw input:disabled + span { background: var(--color-switch-disabled); }
+  .sw input:disabled + span::after { background: var(--color-switch-handle-disabled); }
+  .sw input:disabled:checked + span { background: var(--color-switch-disabled-checked); }
+  .sw input:focus-visible + span { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+
+  /* Badges: soft semantic fills. */
+  .badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .badge { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-pill); white-space: nowrap;
+           border: 1px solid var(--color-border-soft); color: var(--color-text-muted); background: transparent; }
+  .badge.removable, .badge.addable { color: var(--color-accent-text); background: var(--color-accent-soft); border-color: transparent; }
+  .badge.core { color: var(--color-success); background: var(--color-success-soft); border-color: transparent; }
+  .badge.platform, .badge.othermcu { border-style: dashed; }
+  .badge.dev { color: var(--color-warning); background: var(--color-warning-soft); border-color: transparent; }
+  .badge.unneeded { color: var(--color-danger); background: var(--color-danger-soft); border-color: transparent; }
+  .badge.needed { color: var(--color-info); background: var(--color-info-soft); border-color: transparent; }
+  .badge.follows { color: var(--color-info); border-color: var(--color-info); border-style: dashed; }
+
+  /* Your setup. */
+  .fgroup { margin: 10px 0; }
+  .fgroup .gname { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+  .fgroup .ghint { font-weight: 400; color: var(--color-text-muted); margin-left: 4px; }
+  .fitems { display: flex; flex-wrap: wrap; gap: 6px; }
+  .fitem { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 11px 4px 8px; user-select: none;
+           border: 1px solid var(--color-border-soft); border-radius: var(--radius-pill); cursor: pointer; background: var(--color-input-bg);
+           transition: border-color var(--animation-speed), background-color var(--animation-speed); }
+  .fitem:hover { border-color: var(--color-border); }
+  .fitem.on { border-color: var(--color-accent); background: var(--color-accent-soft); }
+  .fitem.off { color: var(--color-text-muted); text-decoration: line-through; }
+  .fitem input { margin: 0; }
+  .fitem.na { cursor: not-allowed; opacity: .55; text-decoration: line-through; color: var(--color-text-muted);
+              background: transparent; border-style: dashed; }
+  .fitem.na:hover { border-color: var(--color-border-soft); }
+  .natag { font-size: 10px; font-weight: 600; text-decoration: none; display: inline-block; padding: 0 6px;
+           border-radius: var(--radius-pill); border: 1px solid var(--color-border-soft); }
+  #setupSummary { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border-soft); font-size: 12px;
+                  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #setupSummary details { flex-basis: 100%; }
+  #setupSummary summary { cursor: pointer; color: var(--color-text-muted); }
+  .guards { font: 11px/1.5 var(--font-mono); margin: 6px 0 0; padding: 8px; background: var(--color-surface-sunken);
+            border: 1px solid var(--color-border-soft); border-radius: var(--radius-sm); white-space: pre-wrap; max-height: 200px; overflow: auto; }
+
+  /* Selection preview. */
+  .diff { font-family: var(--font-mono); font-size: 11.5px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .diff span { padding: 1px 6px; border-radius: var(--radius-xs); }
+  .diff .a { background: var(--color-info-soft); color: var(--color-info); }
+  .diff .r { background: var(--color-danger-soft); color: var(--color-danger); }
+  .diff .cascade { font-style: italic; opacity: .75; }
+  .err { color: var(--color-danger); font-family: var(--font-mono); font-size: 11.5px; white-space: pre-wrap; }
+
+  /* Flash budget. */
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 4px 10px; font-size: 12px; align-items: baseline; }
+  .kv > span { min-width: 0; }
+  .kv > span:nth-child(3n + 2) { overflow-wrap: anywhere; }
+  .kv .v { font-family: var(--font-mono); font-size: 11.5px; text-align: right; white-space: nowrap; }
+  .kv .k { color: var(--color-text-muted); }
+  .meter { position: relative; height: 16px; border-radius: var(--radius-xs); background: var(--color-meter-bg);
+           border: 1px solid var(--color-meter-border); overflow: hidden; margin: 8px 0 4px; }
+  .meter .fill { position: absolute; inset: 0 auto 0 0; background: var(--color-neutral-500); opacity: .6; }
+  .meter .est { position: absolute; inset: 0 auto 0 0; background: hsl(203, 70%, 52%); border-right: 1px solid hsl(203, 70%, 35%); }
+  .meter .est.over { background: var(--color-danger); }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--color-text-muted); margin-top: 2px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); }
+  .legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .legend .sw-est { background: hsl(203, 70%, 52%); }
+  .legend .sw-est.over { background: var(--color-danger); }
+  .legend .sw-fill { background: var(--color-neutral-500); opacity: .6; }
+  .legend .sw-free { background: var(--color-meter-bg); border: 1px solid var(--color-meter-border); }
+  .budget-note { font-size: 11.5px; color: var(--color-text-muted); margin-top: 8px; }
+  .neg { color: var(--color-success); } .pos { color: var(--color-danger); }
+
+  /* Option details. */
+  #cardBody h3 { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+  #cardBody .cname { font: 11.5px var(--font-mono); color: var(--color-text-muted); }
+  #cardBody p { margin: 8px 0; }
+  #cardBody dl { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 4px 8px; margin: 10px 0 0; font-size: 12px; }
+  #cardBody dt { color: var(--color-text-muted); }
+  #cardBody dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+  #cardBody .why { display: grid; gap: 6px; margin: 8px 0; font-size: 12px; }
+  #cardBody .why div { padding: 7px 10px; border-radius: var(--radius-sm); }
+  #cardBody .keep { background: var(--color-success-soft); box-shadow: inset 3px 0 0 var(--color-success); }
+  #cardBody .strip { background: var(--color-danger-soft); box-shadow: inset 3px 0 0 var(--color-danger); }
+  #cardBody .site { display: block; }
+
+  /* Builds + log. */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; font-weight: 600; color: var(--color-text-muted); padding: 4px 6px; border-bottom: 1px solid var(--color-border); }
+  td { text-align: left; padding: 6px; border-bottom: 1px solid var(--color-border-soft); vertical-align: top; }
+  td.num { font-family: var(--font-mono); font-size: 11.5px; text-align: right; white-space: nowrap; }
+  .dellink { color: var(--color-danger); }
+  pre.log { margin: 0; max-height: 280px; overflow: auto; font: 11px/1.4 var(--font-mono); white-space: pre-wrap;
+            background: var(--color-surface-sunken); border: 1px solid var(--color-border-soft); padding: 8px; border-radius: var(--radius-sm); }
+  pre.log .stderr { color: var(--color-text-muted); } pre.log .error { color: var(--color-danger); font-weight: 600; }
+
+  /* Notes (the Configurator's Info/Warning/Error notes). */
+  .warnbox { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12px;
+             background: var(--color-danger-soft); color: var(--color-danger); box-shadow: inset 3px 0 0 var(--color-danger); }
+  .okbox { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 12px;
+           background: var(--color-success-soft); color: var(--color-success); box-shadow: inset 3px 0 0 var(--color-success); }
+
+  /* Dialogs. */
+  dialog { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-float);
+           color: var(--color-text); padding: 0 16px 16px; width: min(640px, calc(100vw - 32px)); box-shadow: var(--shadow-lg); }
+  dialog::backdrop { background: rgb(0 0 0 / .55); }
+  dialog h2 { margin: 0 -16px 14px; padding: 12px 16px; font-size: 14px; font-weight: 600;
+              background: var(--color-header-bg); color: var(--color-header-fg); border-bottom: 1px solid var(--color-border-soft); }
+  .dlgbtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  #flashInfo dl { display: grid; grid-template-columns: 110px 1fr; gap: 5px 10px; font-size: 12.5px; margin: 0; }
+  #flashInfo dt { color: var(--color-text-muted); }
+  #flashInfo dd { margin: 0; overflow-wrap: anywhere; }
+  .steps { margin: 10px 0 0; padding-left: 20px; font-size: 12px; color: var(--color-text-muted); max-height: 220px; overflow: auto; }
+  .steps li { margin: 3px 0; }
+  .steps li:last-child { color: var(--color-text); }
+  .steps li.warnbox, .steps li.okbox { list-style: none; margin-left: -20px; }
+  .dirbar { display: flex; gap: 6px; }
+  .dirbar input { flex: 1; font-family: var(--font-mono); font-size: 11.5px; }
+  #dirRoots { margin: 8px 0; display: flex; gap: 6px; flex-wrap: wrap; }
+  .dirlist { max-height: 340px; overflow: auto; border: 1px solid var(--color-border-soft); border-radius: var(--radius-sm); }
+  .dirlist button { display: flex; width: 100%; height: auto; justify-content: space-between; border: 0; border-bottom: 1px solid var(--color-border-soft);
+                    border-radius: 0; background: transparent; color: var(--color-text); text-align: left; font-weight: 400; font-size: 12.5px; padding: 7px 10px; }
+  .dirlist button:hover { background: var(--color-hover); }
+  .fwtag { font-size: 11px; font-weight: 600; color: var(--color-success); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img class="logo" src="/assets/rotorflight-logo.svg" alt="Rotorflight" onerror="this.outerHTML=&quot;<span class=logotext>ROTOR<b>FLIGHT</b></span>&quot;">
+    <span class="appname">Firmware Builder</span>
+    <span class="status" id="status">idle</span>
+    <span class="spacer"></span>
+    <button class="icon" id="themeToggle" title="Switch between dark and light theme" aria-label="Switch theme">◐</button>
+  </div>
+  <div class="boardrow">
+    <button id="detect" title="Read the board over USB (MSP_BOARD_INFO), like the Configurator's Detect">Detect board</button>
+    <label class="f">…or pick a board <select id="board"><option value="">Loading boards…</option></select></label>
+    <label class="f" style="flex-direction:row;align-items:center;gap:6px;padding-bottom:7px">
+      <input type="checkbox" id="legacy"> show legacy</label>
+    <div id="boardstatus" class="muted"></div>
+  </div>
+  <div class="source">
+    <span class="f">Firmware source</span>
+    <div class="seg" role="radiogroup" aria-label="Firmware source">
+      <label><input type="radio" name="srcmode" value="release" checked> Rotorflight release</label>
+      <label><input type="radio" name="srcmode" value="local"> Local directory</label>
+    </div>
+    <div id="srcRelease" class="srcpane">
+      <select id="release"><option value="release/4.6.0">release/4.6.0</option></select>
+      <label class="inline"><input type="checkbox" id="pre"> RCs &amp; snapshots</label>
+      <span id="releaseSize" class="inline"></span>
+    </div>
+    <div id="srcLocal" class="srcpane" hidden>
+      <span id="srcdirShow" class="mono muted">no folder chosen</span>
+      <button id="openDir">Open directory…</button>
+    </div>
+  </div>
+  <input type="hidden" id="ref" value="release/4.6.0">
+  <input type="hidden" id="srcdir" value="">
+  <label class="f"><span id="targetlabel">Target</span> <select id="target"></select></label>
+  <label class="f" style="flex-direction:row;align-items:center;gap:6px;padding-bottom:7px">
+    <input type="checkbox" id="erase"> FLASH_CONFIG_ERASE</label>
+  <div class="loadwrap">
+    <button class="primary" id="load" title="Fetch the chosen firmware, check the toolchain and probe every option for this target">Load firmware</button>
+    <span id="loadNote" class="muted"></span>
+  </div>
+</header>
+<div id="jobBanner" class="banner" hidden role="status" aria-live="polite">
+  <div class="bannerrow">
+    <span class="spinner" aria-hidden="true"></span>
+    <b id="jobTitle"></b>
+    <span id="jobStep"></span>
+    <span id="jobTime"></span>
+  </div>
+  <div class="track" id="jobTrack"><div class="fill" id="jobFill"></div></div>
+</div>
+
+<main>
+  <div class="left">
+  <section class="panel" id="setup" hidden>
+    <div class="setuphead">
+      <h2>Your setup</h2>
+      <span class="muted">Tick what this model uses. Options only needed by unticked features become strip candidates.</span>
+    </div>
+    <div id="features"></div>
+    <div id="setupSummary"></div>
+  </section>
+  <section class="panel">
+    <h2>Options</h2>
+    <div id="summary" class="muted">Choose a firmware source and target, then <b>Load firmware</b>. The first load of a release fetches its source and toolchain, which takes a few minutes.</div>
+    <div class="tools" id="tools" hidden>
+      <input type="text" id="search" placeholder="Filter options…">
+      <span id="chips"></span>
+    </div>
+    <div id="list"></div>
+  </section>
+  </div>
+
+  <aside class="side">
+    <section class="panel" id="budget">
+      <h2>Flash budget</h2>
+      <div id="budgetBody" class="muted">Load a target to see its capacity.</div>
+    </section>
+    <section class="panel">
+      <h2>Selection</h2>
+      <div id="preview" class="muted">No changes — builds the baseline.</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="build" disabled>Build</button>
+        <button class="primary" id="buildFlash" disabled title="Build, then flash it to the connected board over USB">Build &amp; flash</button>
+        <button id="reset" disabled>Reset toggles</button>
+      </div>
+    </section>
+    <section class="panel" id="card">
+      <h2>Option details</h2>
+      <div id="cardBody" class="muted">Click an option to see what it does and whether you need it.</div>
+    </section>
+    <details class="panel collapsible" id="buildsPanel">
+      <summary><h2>Builds <span id="buildsCount" class="count"></span></h2></summary>
+      <div id="history" class="muted">None yet. Build the baseline first so later builds show a size delta.</div>
+    </details>
+    <section class="panel">
+      <h2>Log</h2>
+      <pre class="log" id="log"></pre>
+    </section>
+  </aside>
+</main>
+
+<dialog id="dirDialog">
+  <h2>Open firmware directory</h2>
+  <div class="dirbar">
+    <button id="dirUp" title="Parent folder">↑ Up</button>
+    <input type="text" id="dirPath" aria-label="Folder path" placeholder="C:\Projects\Rotorflight\rotorflight-firmware">
+    <button id="dirGo">Go</button>
+  </div>
+  <div id="dirRoots"></div>
+  <div id="dirList" class="dirlist"></div>
+  <div id="dirStatus" class="muted" style="margin-top:8px;font-size:12.5px"></div>
+  <div class="dlgbtns">
+    <button id="dirCancel">Cancel</button>
+    <button class="primary" id="dirUse" disabled>Use this folder</button>
+  </div>
+</dialog>
+
+<dialog id="flashDialog">
+  <h2>Flash firmware</h2>
+  <div id="flashInfo"></div>
+  <div class="meter" id="flashMeter" hidden><div class="est" id="flashBar" style="width:0"></div></div>
+  <ol id="flashStage" class="steps"></ol>
+  <div class="dlgbtns">
+    <button id="flashClose">Cancel</button>
+    <button id="flashRetry" hidden>Try again</button>
+    <button id="flashUsb" hidden>Select DFU device…</button>
+    <button class="primary" id="flashGo">Flash</button>
+  </div>
+</dialog>
+
+<script>
+// Theme follows the Configurator: dark unless the viewer picked light.
+(() => {
+  let t = "dark";
+  try { t = localStorage.getItem("rfb.theme") || "dark"; } catch {}
+  document.documentElement.dataset.theme = t;
+})();
+const $ = (id) => document.getElementById(id);
+const STATE_LABEL = {
+  "on-removable": ["removable", "removable"],
+  "on-locked": ["baseline, locked", ""],
+  "off-addable": ["addable", "addable"],
+  "off-locked": ["unavailable", ""],
+};
+let session = null, busy = null, history = [];
+let filter = "changeable", query = "";
+const add = new Set(), remove = new Set();
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+function setBusy(b) {
+  busy = b;
+  $("status").innerHTML = b ? `<b>${b}…</b>` : "idle";
+  $("load").disabled = !!b;
+  updateButtons();
+  updateLoadNote();
+  if (session) renderBudget();
+}
+
+function selectionDiffers() {
+  if (!session) return false;
+  const c = chosenSource();
+  const loadedWhere = session.local ? session.origin || session.sourceDir : session.ref;
+  return c.local !== session.local || c.where !== loadedWhere || c.target !== session.target ||
+    c.erase !== (session.makeVars?.FLASH_CONFIG_ERASE === "yes");
+}
+
+function updateButtons() {
+  $("build").disabled = !session || !!busy || previewBad || selectionDiffers();
+  $("buildFlash").disabled = $("build").disabled;
+  $("reset").disabled = !add.size && !remove.size;
+}
+
+// --- options list ---------------------------------------------------------
+function groupOf(name) { return name.replace(/^USE_/, "").split("_")[0]; }
+
+function renderSummary() {
+  if (!session) return;
+  const p = session.probe, c = {};
+  for (const o of p.options) c[o.state] = (c[o.state] || 0) + 1;
+  $("summary").innerHTML =
+    `<b>${session.target}</b>${p.family ? ` (${p.family})` : ""} @ ${esc(session.local ? session.origin || session.sourceDir : session.ref)} ` +
+    `<span class="muted">(${session.commit.slice(0, 9)})</span> — ${p.baseline.length} USE_ defines in the baseline; ` +
+    `<b>${c["on-removable"] || 0}</b> removable, <b>${c["off-addable"] || 0}</b> addable, ` +
+    `${(c["on-locked"] || 0) + (c["off-locked"] || 0)} locked.` +
+    (session.staleFiles?.length ? `<div class="warnbox">${session.staleFiles.length} file(s) in your folder changed since it was probed. Builds already use the new code; <b>Load firmware</b> again to re-probe the toggles (needed after adding <code>DISABLE_USE_X</code> guards).</div>` : "");
+  const chips = [["changeable", "Changeable"], ["unneeded", "Not needed"], ["on", "Baseline"], ["all", "All"]];
+  $("chips").innerHTML = chips.map(([k, l]) =>
+    `<button class="chip" data-f="${k}" aria-pressed="${filter === k}">${l}</button>`).join(" ");
+  $("tools").hidden = false;
+}
+
+function visible(o) {
+  if (query && !(o.name.toLowerCase().includes(query) || o.info?.title.toLowerCase().includes(query))) return false;
+  if (filter === "changeable") return o.state === "on-removable" || o.state === "off-addable";
+  if (filter === "unneeded") return need(o.name) === "unneeded" && o.state.startsWith("on-");
+  if (filter === "on") return o.state.startsWith("on-");
+  return true;
+}
+
+const LEVEL_BADGE = { core: "core", platform: "platform", dev: "dev only" };
+const SCOPE_TEXT = {
+  "generic": () => "Defined by the shared headers: a real feature.",
+  "this-mcu": (f) => `Hardware of this MCU family (${f}).`,
+  "other-mcu": (f) => `Belongs to ${f} hardware or platform code. Not applicable to this target.`,
+  "mcu-default": (f) => `A shared feature that is only on by default for ${f}. Often a flash or hardware limit, so unproven here.`,
+  "board-only": (f) => `Only enabled by developer or legacy board targets${f ? ` (${f})` : ""}.`,
+  "build": () => "Set by the build system (Makefile / make/*.mk), not in the headers.",
+  "never-defined": () => "No target or build enables it: debug, experimental or dead code.",
+};
+
+function renderList() {
+  if (!session) return;
+  const groups = new Map();
+  for (const o of session.probe.options) {
+    if (!visible(o)) continue;
+    const g = groupOf(o.name);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(o);
+  }
+  if (!groups.size) {
+    $("list").innerHTML = `<div class="empty">${filter === "changeable"
+      ? "Nothing on this target can be toggled.<br>Baseline features need an <code>#ifndef DISABLE_USE_X</code> guard in the firmware headers to become removable."
+      : filter === "unneeded" ? "Your setup needs everything that is on." : "No options match."}</div>`;
+    return;
+  }
+  const html = [];
+  for (const [g, opts] of [...groups].sort((a, b) => a[0].localeCompare(b[0]))) {
+    html.push(`<div class="group"><h3>${esc(g)} <span class="muted">(${opts.length})</span></h3>`);
+    for (const o of opts) {
+      const on = o.state.startsWith("on-");
+      const changeable = o.state === "on-removable" || o.state === "off-addable";
+      const changed = add.has(o.name) || remove.has(o.name);
+      // A follower is switched off by the preview when its parent is removed.
+      const gone = !!lastPreview && (add.size || remove.size) && lastPreview.removed.includes(o.name);
+      // ...and switched on when its parent is added (e.g. the CMS menus with ENABLE_CMS).
+      const came = !!lastPreview && (add.size || remove.size) && lastPreview.added.includes(o.name);
+      const checked = on ? !remove.has(o.name) && !gone : add.has(o.name) || came;
+      let [label, cls] = STATE_LABEL[o.state];
+      if (o.follows?.length) { label = `follows ${o.follows.map((x) => x.replace(/^USE_/, "")).join(" / ")}`; cls = "follows"; }
+      const n = need(o.name);
+      const badges = [`<span class="badge ${cls}">${label}</span>`];
+      if (o.scope === "other-mcu") badges.push(`<span class="badge othermcu">${esc((o.families || []).join("/") || "other MCU")} only</span>`);
+      const lvl = o.info && LEVEL_BADGE[o.info.level];
+      if (lvl) badges.push(`<span class="badge ${o.info.level}">${lvl}</span>`);
+      if (n) badges.push(`<span class="badge ${n}">${n === "needed" ? "needed" : "not needed"}</span>`);
+      html.push(
+        `<div class="row ${changeable ? "" : "locked"} ${changed ? "changed" : ""} ${selectedName === o.name ? "selected" : ""}" data-row="${o.name}">` +
+        `<label class="sw"><input type="checkbox" data-n="${o.name}" ${checked ? "checked" : ""} ${changeable ? "" : "disabled"}` +
+        ` aria-label="${o.name}"><span></span></label>` +
+        `<div><div class="name">${o.name}${o.info ? `<span class="title">${esc(o.info.title)}</span>` : ""}</div>` +
+        (o.reason ? `<div class="reason">${esc(o.reason)}</div>` : "") +
+        `</div><div class="badges">${badges.join("")}</div></div>`);
+    }
+    html.push("</div>");
+  }
+  $("list").innerHTML = html.join("");
+}
+
+$("list").addEventListener("click", (e) => {
+  if (e.target.closest(".sw")) return;
+  const row = e.target.closest("[data-row]");
+  if (row) selectOption(row.dataset.row);
+});
+
+$("list").addEventListener("change", (e) => {
+  const n = e.target.dataset.n;
+  if (!n) return;
+  const all = session.probe.options;
+  const o = all.find((x) => x.name === n);
+  if (o.state === "off-addable" && e.target.checked) {
+    add.add(n);
+    for (const r of o.requires || []) add.add(r);
+  } else if (o.state === "off-addable") {
+    add.delete(n);
+    for (const x of all) if (x.requires?.includes(n)) add.delete(x.name);
+  }
+  if (o.state === "on-removable") e.target.checked ? remove.delete(n) : remove.add(n);
+  selectedName = n;
+  renderList();
+  renderCard();
+  renderSetupSummary();
+  schedulePreview();
+});
+
+// --- "Your setup": features the model uses -> which options are needed -------------
+let optionInfo = { levels: {}, features: [] };
+let ticked = new Map(); // feature id -> boolean
+let selectedName = null;
+
+function featureKey() { return session ? `rfb.setup.${session.target}` : null; }
+
+// The toggle selection is saved per firmware source + target, so a refresh or a
+// server restart brings back exactly what was chosen.
+function selectionKey() {
+  return session ? `rfb.sel.${session.local ? session.origin || session.sourceDir : session.ref}|${session.target}` : null;
+}
+function saveSelection() {
+  if (!session || restoring) return;
+  store(selectionKey(), JSON.stringify({ add: [...add], remove: [...remove] }));
+}
+let restoring = false;
+
+/**
+ * Rebuild the toggles after a (re)load: the saved selection, then Your setup on
+ * top of it, so anything only an unticked feature needs is off again. Entries
+ * that no longer apply (option now locked, or its guard gone) are dropped.
+ */
+function restoreSelection() {
+  if (!session) return;
+  restoring = true;
+  add.clear(); remove.clear();
+  const byName = new Map(session.probe.options.map((o) => [o.name, o]));
+  let saved = { add: [], remove: [] };
+  try { saved = JSON.parse(recall(selectionKey()) || "{}"); } catch {}
+  for (const n of saved.add ?? []) if (byName.get(n)?.state === "off-addable") add.add(n);
+  for (const n of saved.remove ?? []) if (byName.get(n)?.state === "on-removable") remove.add(n);
+  for (const n of [...add]) for (const r of byName.get(n)?.requires ?? []) if (byName.get(r)?.state === "off-addable") add.add(r);
+  for (const o of session.probe.options) {
+    if (o.state === "on-removable" && need(o.name) === "unneeded") remove.add(o.name);
+    // A ticked feature opts its ENABLE_-guarded options in; an unticked one drops them.
+    if (o.state === "off-addable" && o.guard?.startsWith("ENABLE_") && o.name === `USE_${o.guard.slice("ENABLE_".length)}`) {
+      if (need(o.name) === "needed") add.add(o.name);
+      else if (need(o.name) === "unneeded") add.delete(o.name);
+    }
+  }
+  restoring = false;
+  saveSelection();
+}
+
+function initFeatures() {
+  if (!session || !optionInfo.features.length) return;
+  const base = new Set(session.probe.baseline);
+  let saved = {};
+  try { saved = JSON.parse(recall(featureKey()) || "{}"); } catch {}
+  ticked = new Map();
+  for (const g of optionInfo.features) for (const it of g.items) {
+    // Default: whatever the stock firmware already includes is assumed in use.
+    ticked.set(it.id, it.id in saved ? saved[it.id] : it.options.some((o) => base.has(o)));
+  }
+  renderFeatures();
+}
+
+/** A feature none of whose options exist on this target (built in or addable): nothing to control. */
+let availCache = { session: null, ids: new Map() };
+function featureAvailable(it) {
+  if (!session) return true;
+  if (availCache.session !== session) availCache = { session, ids: new Map() };
+  if (!availCache.ids.has(it.id)) {
+    const byName = availCache.byName ??= new Map(session.probe.options.map((o) => [o.name, o]));
+    availCache.ids.set(it.id, it.options.some((o) => byName.get(o)?.state.startsWith("on-") || byName.get(o)?.state === "off-addable"));
+  }
+  return availCache.ids.get(it.id);
+}
+
+function need(name) {
+  if (!ticked.size) return undefined;
+  let listed = false;
+  for (const g of optionInfo.features) for (const it of g.items) {
+    if (!it.options.includes(name) || !featureAvailable(it)) continue;
+    if (ticked.get(it.id)) return "needed";
+    listed = true;
+  }
+  return listed ? "unneeded" : undefined;
+}
+
+function featuresOf(name) {
+  return optionInfo.features.flatMap((g) => g.items.filter((it) => it.options.includes(name)).map((it) => it.label));
+}
+
+function renderFeatures() {
+  $("setup").hidden = false;
+  const byName = new Map(session.probe.options.map((o) => [o.name, o]));
+  $("features").innerHTML = optionInfo.features.map((g) =>
+    `<div class="fgroup"><div class="gname">${esc(g.group)} <span class="ghint">${esc(g.hint || "")}</span></div><div class="fitems">` +
+    g.items.map((it) => {
+      if (!featureAvailable(it)) {
+        return `<label class="fitem na" title="Not available on ${esc(session.target)}: none of its options (${esc(it.options.join(", "))}) exist on this target, built in or addable.">` +
+          `<input type="checkbox" disabled aria-disabled="true">${esc(it.label)} <span class="natag">n/a</span></label>`;
+      }
+      return `<label class="fitem ${ticked.get(it.id) ? "on" : "off"}" title="${esc(it.options.join(", "))}">` +
+        `<input type="checkbox" data-feature="${it.id}" ${ticked.get(it.id) ? "checked" : ""}>${esc(it.label)}</label>`;
+    }).join("") + `</div></div>`).join("");
+  renderSetupSummary();
+}
+
+$("features").addEventListener("change", (e) => {
+  const id = e.target.dataset.feature;
+  if (!id) return;
+  ticked.set(id, e.target.checked);
+  store(featureKey(), JSON.stringify(Object.fromEntries(ticked)));
+  // Keep the toggles in step with the feature: unticking switches off what only it needed,
+  // ticking it again switches those back on.
+  const item = optionInfo.features.flatMap((g) => g.items).find((it) => it.id === id);
+  const byName = new Map(session.probe.options.map((o) => [o.name, o]));
+  for (const name of item?.options ?? []) {
+    const o = byName.get(name);
+    if (!o) continue;
+    // Opt-in options (an ENABLE_ guard in the firmware) follow the feature both ways.
+    // Only the option a flag is named after (ENABLE_CMS -> USE_CMS), so another feature
+    // that shares the flag (HoTT text mode) cannot switch CMS on by itself.
+    const optIn = o.state === "off-addable" && o.guard?.startsWith("ENABLE_") && o.name === `USE_${o.guard.slice("ENABLE_".length)}`;
+    if (e.target.checked) { remove.delete(name); if (optIn) add.add(name); }
+    else if (o.state === "on-removable" && need(name) === "unneeded") remove.add(name);
+    else if (optIn && need(name) === "unneeded") add.delete(name);
+  }
+  renderFeatures(); renderList(); renderCard(); schedulePreview();
+});
+
+function setupPlan() {
+  const plan = { remove: [], add: [], lockedUnneeded: [], lockedNeeded: [] };
+  if (!session) return plan;
+  for (const o of session.probe.options) {
+    const n = need(o.name);
+    if (n === "unneeded" && o.state === "on-removable") plan.remove.push(o.name);
+    // Followers go with their parent: they never need a guard of their own.
+    if (n === "unneeded" && o.state === "on-locked" && !o.follows?.length) plan.lockedUnneeded.push(o);
+    if (n === "needed" && o.state === "off-addable") plan.add.push(o.name);
+    if (n === "needed" && o.state === "off-locked" && o.scope !== "other-mcu") plan.lockedNeeded.push(o);
+  }
+  return plan;
+}
+
+function renderSetupSummary() {
+  if (!session || !ticked.size) return;
+  const p = setupPlan();
+  const pending = p.remove.some((n) => !remove.has(n)) || p.add.some((n) => !add.has(n));
+  const guards = p.lockedUnneeded.map((o) => o.name);
+  $("setupSummary").innerHTML =
+    `<span><b>${p.remove.length + p.lockedUnneeded.length}</b> options not needed by your setup: ` +
+    `<b>${p.remove.length}</b> removable now, <b>${p.lockedUnneeded.length}</b> locked.` +
+    (p.add.length ? ` <b>${p.add.length}</b> needed option(s) to add.` : "") + `</span>` +
+    `<button id="applySetup" ${pending ? "" : "disabled"}>Apply to toggles</button>` +
+    (p.lockedNeeded.length ? `<span class="muted">Needed but unavailable here: ${p.lockedNeeded.map((o) => esc(o.name)).join(", ")}</span>` : "") +
+    (guards.length ? `<details><summary>Firmware guards that would make the ${guards.length} locked ones removable</summary>` +
+      `<div class="guards">${guards.map((n) => `#ifndef DISABLE_${n}\n#define ${n}\n#endif`).join("\n\n")}</div>` +
+      `<button id="copyGuards" style="margin-top:6px">Copy names</button></details>` : "");
+}
+
+$("setupSummary").addEventListener("click", async (e) => {
+  if (e.target.id === "applySetup") {
+    const p = setupPlan();
+    for (const n of p.remove) remove.add(n);
+    for (const n of p.add) {
+      add.add(n);
+      for (const r of session.probe.options.find((o) => o.name === n)?.requires || []) add.add(r);
+    }
+    renderList(); renderSetupSummary(); schedulePreview();
+  }
+  if (e.target.id === "copyGuards") {
+    const names = setupPlan().lockedUnneeded.map((o) => o.name).join("\n");
+    try { await navigator.clipboard.writeText(names); e.target.textContent = "Copied"; } catch { e.target.textContent = "Copy failed"; }
+  }
+});
+
+// --- option details card ------------------------------------------------------------
+function selectOption(name) {
+  selectedName = name;
+  for (const el of document.querySelectorAll(".row.selected")) el.classList.remove("selected");
+  document.querySelector(`[data-row="${CSS.escape(name)}"]`)?.classList.add("selected");
+  renderCard();
+}
+
+function measuredDelta(o) {
+  // A build that differs from the baseline by just this option (plus what it requires).
+  const solo = new Set([o.name, ...(o.requires || [])]);
+  const local = history.find((h) => h.ok && !h.options.length && h.target === session.target && h.commit === session.commit);
+  const sbl = session.sizes?.baseline;
+  const base = local ?? (sbl && sbl.source !== "nearest" ? { flash: sbl.flash } : null);
+  if (!base) return null;
+  for (const h of history.slice().reverse()) {
+    if (!h.ok || h.target !== session.target || h.commit !== session.commit) continue;
+    const byGuard = new Map(session.probe.options.filter((x) => x.guard).map((x) => [x.guard, x.name]));
+    const names = h.options.map((x) => byGuard.get(x) ?? x);
+    if (names.length === solo.size && names.every((x) => solo.has(x))) return { delta: h.flash - base.flash, options: h.options };
+  }
+  return null;
+}
+
+function renderCard() {
+  const o = selectedName && session?.probe.options.find((x) => x.name === selectedName);
+  if (!o) {
+    $("cardBody").classList.add("muted");
+    $("cardBody").innerHTML = `Click an option to see what it does and whether you need it.`;
+    return;
+  }
+  const i = o.info;
+  const fams = (o.families || []).join("/");
+  const n = need(o.name);
+  const feats = featuresOf(o.name);
+  const requiredBy = session.probe.options.filter((x) => x.requires?.includes(o.name)).map((x) => x.name);
+  const m = measuredDelta(o);
+  const comment = (o.sites || []).find((s) => s.comment)?.comment;
+  const row = (k, v) => (v ? `<dt>${k}</dt><dd>${v}</dd>` : "");
+  const more = o.consumers - (o.consumerFiles || []).length;
+  $("cardBody").classList.remove("muted");
+  $("cardBody").innerHTML =
+    `<h3>${esc(i?.title || o.name)}</h3><div class="cname">${o.name}${i ? ` · ${esc(i.category)}` : ""}</div>` +
+    `<p>${esc(i?.summary || comment || "No description yet. Add one to data/option-info.json.")}</p>` +
+    (i && (i.enable || i.disable) ? `<div class="why">` +
+      (i.enable ? `<div class="keep"><b>Keep / add it if:</b> ${esc(i.enable)}</div>` : "") +
+      (i.disable ? `<div class="strip"><b>Strip it if:</b> ${esc(i.disable)}</div>` : "") + `</div>` : "") +
+    `<dl>` +
+    row("Importance", i ? `<b>${esc(i.level)}</b> — ${esc(optionInfo.levels[i.level] || "")}` : "") +
+    row("This target", `${esc(STATE_LABEL[o.state][0])}${o.reason ? ` — ${esc(o.reason)}` : ""}`) +
+    row("Scope", esc(SCOPE_TEXT[o.scope]?.(fams) || o.scope)) +
+    row("Your setup", n ? `${n === "needed" ? "Needed" : "Not needed"} (${esc(feats.join(", "))})` : "Not tied to a setup feature.") +
+    row("Requires", (o.requires || []).map((x) => `<code>${x}</code>`).join(" ")) +
+    row("Required by", requiredBy.map((x) => `<code>${x}</code>`).join(" ")) +
+    row("Measured", m ? `<b>${m.delta > 0 ? "+" : ""}${m.delta.toLocaleString()} B</b> flash (${esc(m.options.join(" "))})` : "") +
+    row("Firmware note", comment && i?.summary ? `<span class="mono">// ${esc(comment)}</span>` : "") +
+    row("Defined in", (o.sites || []).map((s) => `<span class="site mono">${esc(s.file)}:${s.line}${s.families ? ` [${esc(s.families.join("/"))}]` : ""}${s.build ? " (build flag)" : ""}</span>`).join("")) +
+    row(`Used in ${o.consumers}`, (o.consumerFiles || []).map((f) => `<span class="site mono">${esc(f.replace(/^src\/main\//, ""))}</span>`).join("") + (more > 0 ? `<span class="muted">…and ${more} more</span>` : "")) +
+    `</dl>`;
+}
+
+$("chips").addEventListener("click", (e) => {
+  if (!e.target.dataset.f) return;
+  filter = e.target.dataset.f;
+  renderSummary(); renderList();
+});
+$("search").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); renderList(); });
+$("reset").addEventListener("click", () => { add.clear(); remove.clear(); renderList(); renderSetupSummary(); schedulePreview(); });
+
+// --- preview: preprocess the whole selection together -------------------------
+let previewTimer, previewSeq = 0, previewBad = false;
+function schedulePreview() {
+  saveSelection();
+  clearTimeout(previewTimer);
+  updateButtons();
+  previewTimer = setTimeout(runPreview, 250);
+}
+async function runPreview() {
+  if (!add.size && !remove.size) {
+    previewBad = false; lastPreview = null; renderBudget(); renderList();
+    $("preview").innerHTML = `<span class="muted">No changes — builds the baseline.</span>`;
+    return updateButtons();
+  }
+  const seq = ++previewSeq;
+  $("preview").innerHTML = `<span class="muted">Preprocessing selection…</span>`;
+  try {
+    const p = await api("/api/preview", { add: [...add], remove: [...remove] });
+    if (seq !== previewSeq) return;
+    previewBad = !p.ok;
+    lastPreview = p; renderBudget(); renderList();
+    const chosen = new Set([...add, ...remove]);
+    const tag = (n, c) => `<span class="${c} ${chosen.has(n) ? "" : "cascade"}" title="${chosen.has(n) ? "selected" : "knock-on effect"}">${c === "a" ? "+" : "−"}${n}</span>`;
+    $("preview").innerHTML =
+      `<div class="muted" style="margin-bottom:6px">Effective change after all headers (italic = knock-on effects):</div>` +
+      `<div class="diff">${p.added.map((n) => tag(n, "a")).join("")}${p.removed.map((n) => tag(n, "r")).join("")}</div>` +
+      (p.ok ? "" : `<div class="err" style="margin-top:8px">${p.errors.map(esc).join("\n")}</div>`) +
+      `<div class="muted" style="margin-top:8px">OPTIONS="${esc(p.options.join(" "))}"</div>`;
+  } catch (err) {
+    previewBad = true;
+    $("preview").innerHTML = `<div class="err">${esc(err.message)}</div>`;
+  }
+  updateButtons();
+}
+
+// --- flash budget ------------------------------------------------------------------
+let lastPreview = null;
+const kb = (b) => `${(b / 1024).toFixed(1)} KB`;
+// F7 maps the same flash twice (AXIM_FLASH* and ITCM_FLASH*); count it once.
+const isFwFlash = (r) => /FLASH/.test(r.name) && !/CONFIG|CUSTOM_DEFAULTS|SYSTEM|^ITCM_/.test(r.name) && r.size > 0;
+const isRamRegion = (r) => /RAM|CCM|DTCM/.test(r.name) && !/FLASH/.test(r.name) && r.size > 0;
+
+function renderBudget() {
+  if (!session) return;
+  const z = session.sizes || {};
+  const b = z.baseline;
+  const src = b?.source ?? "build";
+  const fromHex = src === "official" || src === "nearest"; // no ELF behind it
+  const mem = b?.memory || z.capacity || [];
+  const fw = mem.filter(isFwFlash), rams = mem.filter(isRamRegion);
+  const cap = fw.length ? fw.reduce((n, r) => n + r.size, 0) : (z.flashKb || 0) * 1024;
+  const ramCap = rams.reduce((n, r) => n + r.size, 0);
+  const changed = add.size || remove.size;
+  const est = changed && lastPreview?.estimate ? lastPreview.estimate : null;
+  const addedCount = changed && lastPreview ? lastPreview.added.length : 0;
+  const pct = (v) => (cap ? `${((100 * v) / cap).toFixed(1)}%` : "");
+  const width = (v) => (cap ? Math.min(100, (100 * v) / cap) : 0);
+  const B = (n) => `${n.toLocaleString()} B`;
+  const buildBtn = `<button id="buildBaseline" ${busy ? "disabled" : ""}>Build baseline</button>`;
+  const rows = [];
+  const notes = [];
+  const row = (k, mid, v) => rows.push(`<span class="k">${k}</span><span class="muted">${mid}</span><span class="v">${v}</span>`);
+
+  row("MCU", `<span style="color:var(--ink)">${esc(session.target)}${session.probe.family ? ` (${session.probe.family})` : ""}</span>`, z.flashKb ? `${z.flashKb} KB flash` : "");
+  if (fw.length) row("Firmware area", fw.map((r) => esc(r.name)).join(" + "), kb(cap));
+
+  // Builds of exactly this selection (or of the baseline) at this commit.
+  const want = changed ? (lastPreview?.options ?? null) : [];
+  const mine = history.filter((h) => h.ok && h.target === session.target && h.commit === session.commit);
+  const built = want && [...mine].reverse().find((h) => h.options.length === want.length && h.options.every((o) => want.includes(o)));
+  const lastOther = !built && mine.length ? mine[mine.length - 1] : null;
+
+  if (!b) {
+    if (z.nearest) row("Nearest release", `${esc(z.nearest.tag)}, ${pct(z.nearest.flash)}`, B(z.nearest.flash));
+    notes.push(`Build once with no changes (about a minute) to measure this tree's baseline and enable savings estimates. ${buildBtn}`);
+  } else {
+    const label = {
+      build: "local build",
+      previous: `≈ last local baseline (${esc((b.commit || "").slice(0, 9))})`,
+      official: `official ${esc(b.tag)}`,
+      nearest: `≈ nearest release ${esc(b.tag)}`,
+    }[src];
+    row("Baseline", `${label}, ${pct(b.flash)}`, `${src === "build" || src === "official" ? "" : "≈ "}${B(b.flash)}`);
+    if (src === "build" && z.official) row("Official", esc(z.official.tag), B(z.official.flash));
+    if (src === "previous") notes.push(`Baseline from this tree's last baseline build, at an earlier commit (${esc((b.commit || "").slice(0, 9))}); this tree is now at ${esc(session.commit.slice(0, 9))}. Rebuild it for exact numbers. ${buildBtn}`);
+    if (src === "nearest") notes.push(`Approximation from <span class="mono">${esc(b.asset)}</span>: the nearest release to this tree. Your tree's changes since then are not included. Build the baseline for exact size, RAM and savings estimates. ${buildBtn}`);
+    if (src === "official") notes.push(`From <span class="mono">${esc(b.asset)}</span> on GitHub, no build needed.` +
+      (z.modifiedFromTag ? ` <span class="warn">Your tree has uncommitted edits, so its real baseline may differ.</span>` : ""));
+  }
+
+  if (changed && b) {
+    if (est) {
+      const after = b.flash - est.flash;
+      row("Estimate", `≈ ${pct(after)}${addedCount ? ` + ${addedCount} added` : ""}, at least −${B(est.flash)}`, `≤ ${B(after)}`);
+    } else if (fromHex) {
+      row("Estimate", "needs an ELF", "?");
+      notes.push(`Savings estimates need symbol sizes from an ELF, which releases do not publish. A local baseline build provides it.`);
+    } else {
+      row("Estimate", lastPreview ? "none" : "…", "?");
+    }
+  }
+  if (built) {
+    const exact = b && src === "build";
+    row(changed ? "Built" : "Built baseline", `${new Date(built.at).toLocaleTimeString()}, ${pct(built.flash)}` +
+      (b && changed ? `, ${exact ? "" : "≈ "}${built.flash - b.flash > 0 ? "+" : "−"}${B(Math.abs(built.flash - b.flash))}` : ""),
+      `<b>${B(built.flash)}</b>`);
+  } else if (lastOther) {
+    row("Last build", `other selection, ${pct(lastOther.flash)}`, B(lastOther.flash));
+  }
+
+  // Bar: baseline behind, then the measured build (or else the estimate) in front.
+  const front = built ? built.flash : est && b ? b.flash - est.flash : b ? b.flash : null;
+  const frontLabel = built ? (changed ? "built" : "built baseline") : est && b ? "estimate" : "baseline";
+  const approx = (src === "build" || src === "official") ? "" : "≈ ";
+  const showBase = b && front !== null && front !== b.flash;
+  const meter = front === null ? "" :
+    `<div class="meter" title="${showBase ? `baseline vs ${frontLabel}` : frontLabel}">` +
+    (showBase ? `<div class="fill" style="width:${width(b.flash)}%"></div>` : "") +
+    `<div class="est ${front > cap ? "over" : ""}" style="width:${width(front)}%"></div></div>` +
+    `<div class="legend"><span><i class="sw-est ${front > cap ? "over" : ""}"></i>${frontLabel} ${frontLabel === "baseline" ? approx : est && !built ? "≤ " : ""}${B(front)}</span>` +
+    (showBase ? `<span><i class="sw-fill"></i>baseline ${approx}${B(b.flash)}</span>` : "") +
+    (cap ? `<span><i class="sw-free"></i>free ${B(Math.max(0, cap - front))}</span>` : "") + `</div>`;
+  if (est && !built) notes.unshift(`Estimate counts code inside each removed feature's <code>#ifdef</code> blocks, so real savings are larger (GPS: estimated 13.8 KB, measured 26.4 KB).` +
+    (addedCount ? ` Added options are not estimated; build to measure them.` : "") +
+    (z.located ? ` ${(100 * z.located).toFixed(0)}% of the baseline could be traced to source.` : ""));
+  if (changed && !built) notes.push(`Build this selection to see its exact size here.`);
+
+  if (ramCap && b && b.memory && b.ram !== undefined) {
+    const ramUsed = b.memory.filter(isRamRegion).reduce((n, r) => n + r.used, 0);
+    row("RAM", `${rams.map((r) => esc(r.name)).join(" + ")}${est?.ram ? `, ≈ −${B(est.ram)}` : ""}`, `${kb(ramUsed)} / ${kb(ramCap)}`);
+  } else if (ramCap) {
+    row("RAM", "capacity only (no ELF)", kb(ramCap));
+  }
+
+  $("budgetBody").classList.remove("muted");
+  $("budgetBody").innerHTML = `<div class="kv">${rows.join("")}</div>${meter}` +
+    notes.map((n) => `<div class="budget-note">${n}</div>`).join("");
+}
+
+$("budgetBody").addEventListener("click", async (e) => {
+  if (e.target.id !== "buildBaseline") return;
+  try { await api("/api/build", { add: [], remove: [] }); } catch (err) { appendLog(err.message, "error"); }
+});
+
+// --- history ------------------------------------------------------------------
+function renderHistory() {
+  $("buildsCount").textContent = history.length ? `(${history.length})` : "";
+  if (!history.length) {
+    $("history").innerHTML = `<span class="muted">None yet. Build the baseline first so later builds show a size delta.</span>`;
+    return;
+  }
+  const rows = history.map((h, i) => [h, i]).reverse().map(([h, i]) => {
+    const base = history.find((b) => b.ok && !b.options.length && b.target === h.target && b.commit === h.commit);
+    const sb = session?.sizes?.baseline;
+    const baseFlash = base ? base.flash : sb && sb.source !== "nearest" && session.target === h.target && session.commit === h.commit ? sb.flash : null;
+    const delta = h.ok && baseFlash !== null && h !== base ? h.flash - baseFlash : null;
+    return `<tr><td>${new Date(h.at).toLocaleTimeString()}<br><span class="muted">${h.target}</span>` +
+      (h.ok && h.hexPath ? `<br><a href="/api/hex?i=${i}" download>.hex</a> · <a href="#" data-flash="${i}">flash</a>` : "") +
+      `<br><a href="#" class="dellink" data-delete="${esc(h.at)}" title="Remove this build and its files">delete</a></td>` +
+      `<td class="name">${h.options.length ? h.options.map(esc).join("<br>") : "<span class='muted'>baseline</span>"}</td>` +
+      `<td class="num">${h.ok ? `${h.flash.toLocaleString()} B` : `<span class="pos">failed</span>`}` +
+      (delta !== null ? `<br><span class="${delta < 0 ? "neg" : "pos"}">${delta > 0 ? "+" : ""}${delta.toLocaleString()} B</span>` : "") +
+      `</td></tr>`;
+  });
+  $("history").innerHTML = `<table><tr><th>When</th><th>Options</th><th>Flash</th></tr>${rows.join("")}</table>` +
+    `<div class="budget-note">Or flash it with the Configurator: in its's Firmware Flasher, pick your board first, then ` +
+    `<b>Load Firmware [Local]</b> with the downloaded .hex. It adds the board config before flashing.</div>`;
+}
+
+// --- log ------------------------------------------------------------------------
+const MAX_LOG = 1500;
+function appendLog(line, stream) {
+  const el = $("log");
+  const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+  const div = document.createElement("div");
+  div.className = stream;
+  div.textContent = line;
+  el.appendChild(div);
+  while (el.childNodes.length > MAX_LOG) el.firstChild.remove();
+  if (atBottom) el.scrollTop = el.scrollHeight;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// --- wiring -----------------------------------------------------------------------
+$("load").addEventListener("click", async () => {
+  try {
+    await api("/api/load", {
+      ref: $("ref").value, target: $("target").value,
+      sourceDir: $("srcdir").value, configErase: $("erase").checked,
+    });
+  } catch (err) { appendLog(err.message, "error"); }
+});
+$("build").addEventListener("click", async () => {
+  try { await api("/api/build", { add: [...add], remove: [...remove] }); }
+  catch (err) { appendLog(err.message, "error"); }
+});
+
+const es = new EventSource("/api/events");
+es.addEventListener("log", (e) => { const d = JSON.parse(e.data); appendLog(d.line, d.stream); });
+es.addEventListener("busy", (e) => setBusy(JSON.parse(e.data).busy));
+es.addEventListener("progress", (e) => {
+  const d = JSON.parse(e.data);
+  // progress now arrives as part of the job banner
+});
+function applySession(next) {
+  const prev = session;
+  session = next;
+  if (!session) return;
+  // Updates to the same load (baseline measured, folder changes synced) keep the toggles.
+  const same = prev && prev.sourceDir === session.sourceDir && prev.target === session.target &&
+    prev.commit === session.commit && prev.probe.durationMs === session.probe.durationMs;
+  if (!same) { selectedName = null; lastPreview = null; initFeatures(); restoreSelection(); }
+  renderSummary(); renderList(); renderCard(); renderBudget(); renderHistory(); updateLoadNote();
+  if (!same) runPreview();
+}
+es.addEventListener("session", (e) => applySession(JSON.parse(e.data)));
+
+// Updates sent while the connection was down (e.g. a server restart) are lost,
+// so after reconnecting, re-read the whole state instead of trusting what we show.
+let disconnected = false;
+es.addEventListener("error", () => { disconnected = true; });
+es.addEventListener("open", async () => {
+  if (!disconnected) return;
+  disconnected = false;
+  try {
+    const s = await api("/api/state");
+    history = s.history; renderHistory();
+    setBusy(s.busy);
+    renderJob(s.job);
+    applySession(s.session);
+    appendLog("Reconnected to the app server; view refreshed.", "stderr");
+  } catch {}
+});
+es.addEventListener("job", (e) => renderJob(JSON.parse(e.data)));
+es.addEventListener("history", (e) => { history = JSON.parse(e.data); renderHistory(); renderCard(); renderBudget(); onHistoryForFlash(); });
+
+// --- targets: from the ref's checkout when it is on disk ---------------------------
+let targetList = [];
+function store(key, value) { try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch {} }
+function recall(key) { try { return localStorage.getItem(key); } catch { return null; } }
+
+async function refreshTargets() {
+  const want = $("target").value || recall("rfb.target") || "STM32F405";
+  const q = new URLSearchParams({ ref: $("ref").value.trim(), sourceDir: $("srcdir").value.trim() });
+  try {
+    const r = await api(`/api/targets?${q}`);
+    targetList = r.targets;
+    $("targetlabel").textContent = r.fromSource ? "Target" : "Target (built-in list until loaded)";
+  } catch { targetList = targetList.length ? targetList : ["STM32F405"]; }
+  setTargetOptions(want);
+}
+function setTargetOptions(want) {
+  const list = targetList.includes(want) ? targetList : [...targetList, want];
+  $("target").innerHTML = list.map((t) => `<option ${t === want ? "selected" : ""}>${esc(t)}</option>`).join("");
+}
+function selectTarget(t) {
+  setTargetOptions(t);
+  store("rfb.target", t);
+  updateLoadNote();
+  showReleaseSize();
+  return targetList.includes(t);
+}
+$("target").addEventListener("change", () => store("rfb.target", $("target").value));
+let refTimer;
+for (const id of ["ref", "srcdir"]) $(id).addEventListener("input", () => { clearTimeout(refTimer); refTimer = setTimeout(refreshTargets, 400); });
+
+// --- boards: the Configurator's list (rotorflight-targets) --------------------------
+let boards = [];
+function renderBoards(selected = $("board").value) {
+  const legacy = $("legacy").checked;
+  const byMfr = new Map();
+  for (const b of boards) {
+    if (!b.supported && !legacy && b.key !== selected) continue;
+    if (!byMfr.has(b.manufacturer)) byMfr.set(b.manufacturer, []);
+    byMfr.get(b.manufacturer).push(b);
+  }
+  const groups = [...byMfr].sort((a, b) => a[0].localeCompare(b[0])).map(([m, list]) =>
+    `<optgroup label="${esc(m)}">${list.sort((a, b) => a.board.localeCompare(b.board)).map((b) =>
+      `<option value="${esc(b.key)}" ${b.key === selected ? "selected" : ""}>${esc(b.board)}${b.supported ? "" : " (legacy)"}</option>`).join("")}</optgroup>`);
+  $("board").innerHTML = `<option value="">— none —</option>${groups.join("")}`;
+}
+$("legacy").addEventListener("change", () => renderBoards());
+
+async function pickBoard(key, { quiet = false } = {}) {
+  store("rfb.board", key || null);
+  if (!key) { if (!quiet) $("boardstatus").textContent = ""; return; }
+  if (!quiet) $("boardstatus").innerHTML = `Looking up ${esc(key)}…`;
+  try {
+    const { target } = await api(`/api/board-target?key=${encodeURIComponent(key)}`);
+    if (!target) throw new Error("its config does not name an MCU target");
+    const ok = selectTarget(target);
+    if (!quiet) $("boardstatus").innerHTML = `<b>${esc(key)}</b> → ${esc(target)}` +
+      (ok ? "" : ` <span class="warn">(not a target in this ref)</span>`) +
+      (session && session.target !== target ? ` <span class="warn">· loaded target is ${esc(session.target)}: Load firmware again</span>` : "");
+  } catch (err) {
+    $("boardstatus").innerHTML = `<span class="warn">${esc(key)}: ${esc(err.message)}</span>`;
+  }
+}
+$("board").addEventListener("change", () => pickBoard($("board").value));
+
+// --- detect: MSP_BOARD_INFO over Web Serial, as the Configurator's Detect does --------
+// Serial (MSP) and DFU code lives in /flasher.js so it can be tested outside the page.
+const flasher = import(`/flasher.js?v=${Date.now()}`); // never a stale cached copy
+let lastPort = null; // the serial port granted by Detect, reused to reboot into DFU
+
+$("detect").addEventListener("click", async () => {
+  if (!("serial" in navigator)) {
+    $("boardstatus").innerHTML = `<span class="warn">This browser has no Web Serial — use Edge or Chrome, or pick the board instead.</span>`;
+    return;
+  }
+  let port;
+  try { port = await navigator.serial.requestPort(); } catch { return; } // picker cancelled
+  $("detect").disabled = true;
+  $("boardstatus").textContent = "Detecting…";
+  try {
+    const F = await flasher;
+    const { info, version } = await F.withMsp(port, async (request) => {
+      const info = F.parseBoardInfo(await request(F.MSP_BOARD_INFO));
+      let version = "";
+      try { const v = await request(F.MSP_FC_VERSION, 1000); version = `${v[0]}.${v[1]}.${v[2]}`; } catch {}
+      return { info, version };
+    });
+    lastPort = port;
+
+    // Same normalisation the Configurator applies to dotted board names.
+    const board = info.boardName.replace(".", "_");
+    const key = board && info.manufacturerId ? `${info.manufacturerId}-${board}` : "";
+    const known = boards.some((b) => b.key === key);
+    if (known && !boards.find((b) => b.key === key).supported) $("legacy").checked = true;
+    renderBoards(known ? key : "");
+    if (known) store("rfb.board", key);
+
+    let target = info.targetName;
+    if (!target && known) target = (await api(`/api/board-target?key=${encodeURIComponent(key)}`)).target;
+    const inRef = target ? selectTarget(target) : false;
+
+    $("boardstatus").innerHTML =
+      `Detected <b>${esc(board || info.boardIdentifier)}</b>` +
+      (info.manufacturerId ? ` (${esc(info.manufacturerId)})` : "") +
+      (target ? ` · <b>${esc(target)}</b>` : ` · <span class="warn">no target reported — pick one</span>`) +
+      (version ? ` · running ${esc(version)}` : "") +
+      (key && !known ? ` · <span class="warn">not in the board list</span>` : "") +
+      (target && !inRef ? ` · <span class="warn">${esc(target)} is not a target in this ref</span>` : "") +
+      (target && session && session.target !== target ? ` · <span class="warn">loaded target is ${esc(session.target)}: Load firmware again</span>` : "");
+  } catch (err) {
+    const busyPort = /open|access|in use|lock/i.test(err.message);
+    $("boardstatus").innerHTML = `<span class="warn">Detect failed: ${esc(err.message)}` +
+      (busyPort ? " — close the Configurator or anything else using the port." : "") + `</span> Pick the board from the list instead.`;
+  } finally {
+    $("detect").disabled = false;
+  }
+});
+
+// --- firmware source: online release or a local directory ------------------------------
+let releases = [];
+function srcMode() { return document.querySelector('input[name="srcmode"]:checked').value; }
+
+function renderReleases() {
+  const pre = $("pre").checked;
+  const want = recall("rfb.release") || $("ref").value;
+  const list = releases.filter((r) => pre || (!r.prerelease && !/-RC\d+$/i.test(r.tag)));
+  const opts = list.map((r) => `<option value="${esc(r.tag)}">${esc(r.tag)}${r.prerelease ? " (snapshot)" : ""}</option>`);
+  if (pre) opts.push(`<option value="master">master (development)</option>`);
+  $("release").innerHTML = opts.join("") || `<option value="release/4.6.0">release/4.6.0</option>`;
+  if ([...$("release").options].some((o) => o.value === want)) $("release").value = want;
+  $("ref").value = $("release").value;
+}
+
+function applySourceMode() {
+  const local = srcMode() === "local";
+  $("srcRelease").hidden = local;
+  $("srcLocal").hidden = !local;
+  $("srcdir").value = local ? recall("rfb.srcdir") || "" : "";
+  $("srcdirShow").textContent = $("srcdir").value || "no folder chosen";
+  $("srcdirShow").classList.toggle("muted", !$("srcdir").value);
+  $("load").disabled = !!busy || (local && !$("srcdir").value);
+  store("rfb.srcmode", srcMode());
+  refreshTargets().then(updateLoadNote);
+}
+
+for (const r of document.querySelectorAll('input[name="srcmode"]')) r.addEventListener("change", applySourceMode);
+$("release").addEventListener("change", () => { $("ref").value = $("release").value; store("rfb.release", $("ref").value); refreshTargets(); });
+$("pre").addEventListener("change", () => { renderReleases(); showReleaseSize(); });
+
+api("/api/releases").then((r) => { releases = r.releases; renderReleases(); showReleaseSize(); }).catch(() => {});
+
+// Official size of the chosen release + target, from the hex GitHub publishes (no build).
+let sizeSeq = 0;
+async function showReleaseSize() {
+  const el = $("releaseSize");
+  const tag = $("ref").value, target = $("target").value;
+  if (srcMode() !== "release" || !tag || !target) { el.textContent = ""; return; }
+  const seq = ++sizeSeq;
+  el.textContent = "size…";
+  try {
+    const { size } = await api(`/api/release-size?tag=${encodeURIComponent(tag)}&target=${encodeURIComponent(target)}`);
+    if (seq !== sizeSeq) return;
+    el.innerHTML = size ? `official ${esc(target)}: <b>${(size.flash / 1024).toFixed(1)} KB</b>` : `no published hex for ${esc(target)}`;
+  } catch { if (seq === sizeSeq) el.textContent = ""; }
+}
+$("release").addEventListener("change", showReleaseSize);
+$("target").addEventListener("change", showReleaseSize);
+for (const r of document.querySelectorAll('input[name="srcmode"]')) r.addEventListener("change", showReleaseSize);
+
+// Folder browser (served by the app: the browser's own picker cannot give WSL a path).
+let dirListing = null;
+async function showDir(path) {
+  $("dirStatus").textContent = "Loading…";
+  try {
+    dirListing = await api(`/api/dirs?path=${encodeURIComponent(path || "")}`);
+  } catch (err) { $("dirStatus").textContent = err.message; return; }
+  const d = dirListing;
+  $("dirPath").value = d.path;
+  $("dirUp").disabled = !d.parent;
+  $("dirRoots").innerHTML = d.roots.map((r) => `<button class="chip" data-path="${esc(r)}">${esc(r)}</button>`).join("");
+  $("dirList").innerHTML = d.dirs.map((x) =>
+    `<button data-path="${esc(x.path)}"><span>📁 ${esc(x.name)}</span>${x.isFirmware ? `<span class="fwtag">Rotorflight firmware</span>` : ""}</button>`).join("") ||
+    `<div class="muted" style="padding:10px">No sub-folders.</div>`;
+  $("dirUse").disabled = !d.isFirmware;
+  $("dirStatus").innerHTML = d.error ? `<span class="warn">${esc(d.error)}</span>`
+    : d.isFirmware ? `This is a Rotorflight firmware tree. It is built exactly as it is on disk, without a git checkout.`
+    : `Not a firmware tree (needs Makefile, make/tools.mk and src/main/target). Open the clone's top-level folder.`;
+}
+$("openDir").addEventListener("click", () => { $("dirDialog").showModal(); showDir($("srcdir").value); });
+$("dirGo").addEventListener("click", () => showDir($("dirPath").value));
+$("dirPath").addEventListener("keydown", (e) => { if (e.key === "Enter") showDir($("dirPath").value); });
+$("dirUp").addEventListener("click", () => dirListing?.parent && showDir(dirListing.parent));
+for (const id of ["dirList", "dirRoots"]) $(id).addEventListener("click", (e) => {
+  const b = e.target.closest("[data-path]");
+  if (b) showDir(b.dataset.path);
+});
+$("dirCancel").addEventListener("click", () => $("dirDialog").close());
+$("dirUse").addEventListener("click", () => {
+  store("rfb.srcdir", dirListing.path);
+  $("dirDialog").close();
+  applySourceMode();
+});
+
+// --- build & flash -------------------------------------------------------------------
+let flashAfter = null; // history length when a "Build & flash" started
+let flashImage = null;
+let flashing = false;
+
+function currentBoardKey() { return $("board").value; }
+
+$("buildFlash").addEventListener("click", async () => {
+  if (!currentBoardKey()) {
+    $("boardstatus").innerHTML = `<span class="warn">Detect or pick your board first: flashing needs its board config.</span>`;
+    return;
+  }
+  if (!("usb" in navigator)) {
+    appendLog("This browser has no WebUSB, so it cannot flash. Use Edge or Chrome.", "error");
+    return;
+  }
+  flashAfter = history.length;
+  try { await api("/api/build", { add: [...add], remove: [...remove] }); }
+  catch (err) { flashAfter = null; appendLog(err.message, "error"); }
+});
+
+function onHistoryForFlash() {
+  if (flashAfter === null || history.length <= flashAfter) return;
+  const i = history.length - 1;
+  flashAfter = null;
+  if (history[i].ok) openFlash(i);
+  else appendLog("Build failed, so nothing was flashed.", "error");
+}
+
+async function openFlash(i) {
+  const key = currentBoardKey();
+  flashImage = null;
+  $("flashMeter").hidden = true;
+  $("flashBar").style.width = "0";
+  $("flashStage").replaceChildren();
+  $("flashRetry").hidden = true;
+  $("flashUsb").hidden = true;
+  $("flashGo").hidden = false;
+  $("flashGo").disabled = true;
+  $("flashClose").textContent = "Cancel";
+  $("flashInfo").innerHTML = `<span class="muted">Preparing image…</span>`;
+  $("flashDialog").showModal();
+  if (!key) {
+    $("flashInfo").innerHTML = `<div class="warnbox">Detect or pick your board first: flashing needs its board config.</div>`;
+    return;
+  }
+  try {
+    const img = await api(`/api/flash-image?i=${i}&board=${encodeURIComponent(key)}`);
+    flashImage = img;
+    const erase = img.makeVars?.FLASH_CONFIG_ERASE === "yes";
+    $("flashInfo").innerHTML =
+      `<dl><dt>Board</dt><dd><b>${esc(img.board)}</b> (${esc(img.target)})</dd>` +
+      `<dt>Firmware</dt><dd>${esc(img.source)}${img.options.length ? ` + <span class="mono">${esc(img.options.join(" "))}</span>` : " (baseline)"}</dd>` +
+      `<dt>Size</dt><dd>${img.bytesTotal.toLocaleString()} bytes in ${img.blocks.length} blocks</dd>` +
+      `<dt>Board config</dt><dd>${img.configInserted ? "inserted from rotorflight-targets" : "<b>not inserted</b>"}</dd>` +
+      `<dt>Settings</dt><dd>${erase ? "<b>erased</b> on first boot (FLASH_CONFIG_ERASE)" : "kept (the settings sector is not erased)"}</dd></dl>` +
+      `<div class="warnbox">Remove the blades or disconnect the motors. Do not unplug the board while it is flashing. ` +
+      `Back up first (CLI <span class="mono">diff all</span>) if you care about its settings.</div>`;
+    $("flashGo").disabled = !img.configInserted;
+    if (!img.configInserted) $("flashInfo").innerHTML += `<div class="warnbox">This firmware has no board-config area, so this app will not flash it. Use the Configurator.</div>`;
+  } catch (err) {
+    $("flashInfo").innerHTML = `<div class="warnbox">${esc(err.message)}</div>`;
+  }
+}
+
+function setFlashStage(text, cls = "") {
+  const li = document.createElement("li");
+  li.textContent = text;
+  if (cls) li.className = cls;
+  $("flashStage").appendChild(li);
+  li.scrollIntoView({ block: "nearest" });
+  appendLog(text, cls === "warnbox" ? "error" : "info");
+}
+
+async function findDfu(timeoutMs) {
+  const F = await flasher;
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    const devs = await navigator.usb.getDevices();
+    const d = devs.find((x) => x.vendorId === F.DFU_FILTER.vendorId && x.productId === F.DFU_FILTER.productId);
+    if (d || Date.now() > end) return d;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+async function runFlash(device) {
+  const F = await flasher;
+  flashing = true;
+  $("flashGo").hidden = true;
+  $("flashUsb").hidden = true;
+  $("flashClose").disabled = true;
+  $("flashMeter").hidden = false;
+  const blocks = flashImage.blocks.map((b) => ({ address: b.address, data: Uint8Array.from(atob(b.data), (c) => c.charCodeAt(0)) }));
+  const weight = { erase: [0, 0.15], write: [0.15, 0.6], verify: [0.75, 0.25], done: [1, 0] };
+  try {
+    await F.flashDfu(device, { blocks }, {
+      onLog: (l) => setFlashStage(l),
+      onProgress: (stage, f) => { const [a, w] = weight[stage]; $("flashBar").style.width = `${(a + w * f) * 100}%`; },
+    });
+    setFlashStage("Flashed and verified. The board is restarting with the new firmware.", "okbox");
+  } catch (err) {
+    const driver = /access|denied|security|claim/i.test(err.message)
+      ? " On Windows the DFU device needs the WinUSB driver (e.g. ImpulseRC Driver Fixer or Zadig), as for the Configurator." : "";
+    setFlashStage(`Flash failed: ${err.message}.${driver} The ROM bootloader is still there; the board stays in DFU, so Try again picks it up directly.`, "warnbox");
+    $("flashRetry").hidden = false;
+  } finally {
+    flashing = false;
+    $("flashClose").disabled = false;
+    $("flashClose").textContent = "Close";
+  }
+}
+
+$("flashGo").addEventListener("click", () => startFlash());
+$("flashRetry").addEventListener("click", () => startFlash());
+
+async function startFlash() {
+  if (!flashImage) return;
+  $("flashGo").disabled = true;
+  $("flashRetry").hidden = true;
+  $("flashUsb").hidden = true;
+  const F = await flasher;
+  let device = await findDfu(0);
+  if (device) {
+    setFlashStage("Board is already in DFU mode.");
+    return runFlash(device);
+  }
+
+  const ports = await navigator.serial?.getPorts?.() ?? [];
+  // After a refresh lastPort is gone: prefer the STM32 virtual COM port Rotorflight boards present.
+  const isFc = (p) => p.getInfo?.().usbVendorId === 0x0483;
+  const port = lastPort ?? ports.find(isFc) ?? ports[0];
+  if (!lastPort && ports.length > 1) setFlashStage(`${ports.length} serial ports are granted to this page; using ${port && isFc(port) ? "the STM32 one" : "the first"}.`);
+  let rebooted = false;
+  if (port) {
+    const pi = port.getInfo?.() ?? {};
+    setFlashStage(`Rebooting the board into its bootloader over USB serial${pi.usbVendorId ? ` (${hex4(pi.usbVendorId)}:${hex4(pi.usbProductId)})` : ""}…`);
+    try {
+      const info = await F.rebootToBootloader(port);
+      setFlashStage(`Board replied: ${info.manufacturerId}-${info.boardName || info.boardIdentifier}, ${info.targetName || "target unknown"}; ` +
+        `asked it to reboot into its ${info.hasFlashBootloader ? "flash" : "ROM DFU"} bootloader.`);
+      if (info.targetName && info.targetName !== flashImage.target) {
+        setFlashStage(`The connected board is an ${info.targetName}, but this firmware is for ${flashImage.target}. Not flashing.`, "warnbox");
+        $("flashGo").disabled = false;
+        return;
+      }
+      rebooted = true;
+    } catch (err) {
+      setFlashStage(`Could not reboot it over USB serial: ${err.message}.` +
+        (/open|access|in use|lock/i.test(err.message) ? " Close the Configurator or anything else using the port." : ""));
+    }
+  } else {
+    setFlashStage("No serial port granted yet (use Detect first), so the board cannot be rebooted from here.");
+  }
+
+  setFlashStage("Waiting for the DFU device (STM32 BOOTLOADER, 0483:DF11)…");
+  device = await findDfu(12000);
+  if (device) return runFlash(device);
+
+  // Diagnose: is the board still running its firmware on the serial port?
+  const stillSerial = port && port.connected !== false && (await navigator.serial.getPorts()).includes(port);
+  if (rebooted && stillSerial && port.connected === true) {
+    setFlashStage("The board is still on its serial port, so it did not switch to DFU. Put it in DFU by hand " +
+      "(hold the BOOT button while plugging in), then press Try again.", "warnbox");
+  } else if (rebooted) {
+    setFlashStage("The board left its serial port but no DFU device appeared. On Windows this is usually the driver: in Device Manager, " +
+      "“STM32 BOOTLOADER” needs the WinUSB driver (ImpulseRC Driver Fixer or Zadig). Or, if the browser has not been " +
+      "allowed to use it yet, click Select DFU device…", "warnbox");
+  } else {
+    setFlashStage("No DFU device found. Put the board in DFU by hand (hold BOOT while plugging in) and press Try again, " +
+      "or click Select DFU device… if it is already in DFU.", "warnbox");
+  }
+  $("flashUsb").hidden = false;
+  $("flashRetry").hidden = false;
+}
+
+const hex4 = (n) => n.toString(16).padStart(4, "0");
+
+$("flashUsb").addEventListener("click", async () => {
+  const F = await flasher;
+  try {
+    const device = await navigator.usb.requestDevice({ filters: [F.DFU_FILTER] });
+    runFlash(device);
+  } catch { /* picker cancelled */ }
+});
+
+$("flashClose").addEventListener("click", () => { if (!flashing) $("flashDialog").close(); });
+$("flashDialog").addEventListener("cancel", (e) => { if (flashing) e.preventDefault(); });
+$("history").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-delete]");
+  if (del) {
+    e.preventDefault();
+    const h = history.find((x) => x.at === del.dataset.delete);
+    if (!h) return;
+    const what = h.options.length ? h.options.join(" ") : "the baseline build";
+    const extra = !h.options.length && h.ok
+      ? "\n\nThis is a measured baseline: deleting it also removes its ELF, so savings estimates stop until you build a baseline again."
+      : "";
+    if (!confirm(`Delete ${what} (${h.target}, ${new Date(h.at).toLocaleTimeString()}) and its .hex/.elf files?${extra}`)) return;
+    try { await api("/api/delete-build", { at: h.at }); } catch (err) { appendLog(err.message, "error"); }
+    return;
+  }
+  const a = e.target.closest("[data-flash]");
+  if (!a) return;
+  e.preventDefault();
+  openFlash(Number(a.dataset.flash));
+});
+
+for (const r of document.querySelectorAll('input[name="srcmode"]')) r.checked = r.value === (recall("rfb.srcmode") || "release");
+applySourceMode();
+
+// --- job banner + "selection differs from what is loaded" ------------------------------
+let jobTimer = null, jobState = null;
+function renderJob(j) {
+  jobState = j;
+  $("jobBanner").hidden = !j;
+  clearInterval(jobTimer);
+  if (!j) return;
+  $("jobTitle").textContent = j.title;
+  const pct = j.total ? Math.min(100, (100 * j.done) / j.total) : null;
+  $("jobStep").textContent = j.step + (j.done !== undefined && j.done !== null
+    ? (j.total ? ` · ${j.done} / ${j.total}` : ` · ${j.done} files`) : "");
+  $("jobTrack").classList.toggle("indeterminate", pct === null);
+  $("jobFill").style.width = pct === null ? "" : `${pct}%`;
+  const tick = () => {
+    const s = Math.round((Date.now() - j.started) / 1000);
+    $("jobTime").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+  tick();
+  jobTimer = setInterval(tick, 1000);
+}
+
+function chosenSource() {
+  return {
+    local: srcMode() === "local",
+    where: srcMode() === "local" ? $("srcdir").value : $("ref").value,
+    target: $("target").value,
+    erase: $("erase").checked,
+  };
+}
+function updateLoadNote() {
+  const c = chosenSource();
+  let note = "";
+  if (!session) note = "Nothing loaded yet.";
+  else {
+    const loadedWhere = session.local ? session.origin || session.sourceDir : session.ref;
+    note = selectionDiffers() ? `Loaded: ${loadedWhere} · ${session.target}. Load firmware to switch.` : "";
+  }
+  $("loadNote").textContent = note;
+  $("load").classList.toggle("attention", !!note && !busy);
+  // The options, setup and builds below belong to what is loaded, not to the new choice.
+  const stale = !!session && !!note;
+  for (const id of ["list", "setup"]) $(id).classList.toggle("stale", stale);
+  updateButtons();
+}
+for (const id of ["target", "erase", "release"]) $(id).addEventListener("change", updateLoadNote);
+for (const r of document.querySelectorAll('input[name="srcmode"]')) r.addEventListener("change", updateLoadNote);
+
+try { $("buildsPanel").open = localStorage.getItem("rfb.buildsOpen") === "1"; } catch {}
+$("buildsPanel").addEventListener("toggle", () => store("rfb.buildsOpen", $("buildsPanel").open ? "1" : "0"));
+
+$("themeToggle").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  store("rfb.theme", next);
+});
+
+api("/api/state").then(async (s) => {
+  renderJob(s.job);
+  for (const l of s.log || []) appendLog(l.line, l.stream);
+  history = s.history; renderHistory();
+  setBusy(s.busy);
+  if (s.session) {
+    session = s.session; initFeatures(); restoreSelection(); renderSummary(); renderList(); renderBudget(); runPreview();
+    if (session.local) {
+      store("rfb.srcdir", session.origin || session.sourceDir);
+      document.querySelector('input[name="srcmode"][value="local"]').checked = true;
+    } else {
+      store("rfb.release", session.ref);
+      document.querySelector('input[name="srcmode"][value="release"]').checked = true;
+      if (releases.length) renderReleases();
+    }
+    applySourceMode();
+  }
+  await refreshTargets();
+  if (s.session) selectTarget(s.session.target);
+});
+
+api("/api/option-info").then((r) => {
+  optionInfo = r;
+  initFeatures();
+  // The setup can only be applied once the feature list is here.
+  if (session) { restoreSelection(); runPreview(); }
+  renderList();
+}).catch(() => {});
+
+api("/api/boards").then((r) => {
+  boards = r.boards;
+  const last = recall("rfb.board");
+  if (last && boards.find((b) => b.key === last && !b.supported)) $("legacy").checked = true;
+  renderBoards(last && boards.some((b) => b.key === last) ? last : "");
+  if (last) pickBoard(last);
+}).catch((err) => {
+  $("board").innerHTML = `<option value="">Board list unavailable</option>`;
+  $("boardstatus").innerHTML = `<span class="warn">${esc(err.message)}</span>`;
+});
+</script>
+</body>
+</html>

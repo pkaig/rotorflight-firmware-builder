@@ -1,0 +1,1967 @@
+{
+  "_comment": "Human context for USE_ options, shown in the sample app's details card. 'options' entries win over 'patterns' (first match). level: core | recommended | optional | niche | hardware | platform | dev. Facts that can be derived from the source (where it is defined, MCU scope, dependencies) are computed by src/probe.ts, not written here.",
+  "levels": {
+    "core": "Required. The flight controller or the Configurator depends on it; removing it breaks basic operation.",
+    "recommended": "Used by most Rotorflight setups. Only remove it if you are sure you do not need it.",
+    "optional": "A real feature that many setups do not use. A good candidate to strip when flash is tight.",
+    "niche": "Legacy or uncommon protocol or feature. A safe strip candidate unless you use that exact equipment.",
+    "hardware": "Support for a specific chip or MCU peripheral. Only useful if the board actually has it.",
+    "platform": "Set by the build system or the MCU platform. Not a feature: never toggle it by hand.",
+    "dev": "Developer, debug or test switch. Do not enable in firmware you fly."
+  },
+  "patterns": [
+    {
+      "match": "^USE_(ACC|GYRO|ACCGYRO)_(SPI_)?(.+)$",
+      "category": "Sensor driver",
+      "level": "hardware",
+      "title": "$3 gyro/accelerometer driver",
+      "summary": "Driver for the $3 gyro/accelerometer chip.",
+      "enable": "Your board's gyro is a $3.",
+      "disable": "Your board uses a different gyro. Every unused IMU driver is dead flash."
+    },
+    {
+      "match": "^USE_BARO_(SPI_)?(.+)$",
+      "category": "Sensor driver",
+      "level": "hardware",
+      "title": "$2 barometer driver",
+      "summary": "Driver for the $2 barometric pressure sensor.",
+      "enable": "Your board has a $2 baro and you use altitude/vario data.",
+      "disable": "No such chip on your board. Baro data is rarely used on helicopters."
+    },
+    {
+      "match": "^USE_MAG_(SPI_)?(.+)$",
+      "category": "Sensor driver",
+      "level": "hardware",
+      "title": "$2 magnetometer driver",
+      "summary": "Driver for the $2 compass chip.",
+      "enable": "You fit that compass, usually as part of a GPS module.",
+      "disable": "No compass of that type is fitted."
+    },
+    {
+      "match": "^USE_FLASH_(M25P16|W25.+)$",
+      "category": "Storage driver",
+      "level": "hardware",
+      "title": "$1 flash chip driver",
+      "summary": "Driver for the $1 SPI flash chip used for onboard blackbox logging.",
+      "enable": "Your board logs to a $1 chip.",
+      "disable": "Your board has a different flash chip, or no onboard flash."
+    },
+    {
+      "match": "^USE_UART(\\d+)$",
+      "category": "MCU peripheral",
+      "level": "hardware",
+      "title": "UART$1",
+      "summary": "Enables hardware serial port $1.",
+      "enable": "The MCU has UART$1 and the board routes it to pads.",
+      "disable": "The MCU does not have UART$1. Removing a UART that does exist loses a serial port."
+    },
+    {
+      "match": "^USE_(LP)?UART(\\d+)_(RX|TX)_DMA$",
+      "category": "MCU peripheral",
+      "level": "hardware",
+      "title": "UART$2 $3 DMA",
+      "summary": "Uses DMA for UART$2 $3 instead of interrupts.",
+      "enable": "Only when the board's DMA mapping is designed for it.",
+      "disable": "Normally decided by the board's hardware design, not per build."
+    },
+    {
+      "match": "^USE_SPI_DEVICE_(\\d+)$",
+      "category": "MCU peripheral",
+      "level": "hardware",
+      "title": "SPI bus $1",
+      "summary": "Enables SPI peripheral $1.",
+      "enable": "The MCU has SPI$1 and the board uses it.",
+      "disable": "The MCU does not have SPI$1."
+    },
+    {
+      "match": "^USE_I2C_DEVICE_(\\d+)$",
+      "category": "MCU peripheral",
+      "level": "hardware",
+      "title": "I2C bus $1",
+      "summary": "Enables I2C peripheral $1.",
+      "enable": "The MCU has I2C$1 and the board uses it.",
+      "disable": "The MCU does not have I2C$1."
+    },
+    {
+      "match": "^USE_SERIALRX_(.+)$",
+      "category": "Receiver protocol",
+      "level": "optional",
+      "title": "$1 serial receiver",
+      "summary": "Decodes the $1 serial receiver protocol.",
+      "enable": "Your receiver talks $1.",
+      "disable": "You use a different receiver protocol. Each unused protocol is a strip candidate."
+    },
+    {
+      "match": "^USE_TELEMETRY_(.+)$",
+      "category": "Telemetry",
+      "level": "optional",
+      "title": "$1 telemetry",
+      "summary": "Sends flight data back to the transmitter over the $1 telemetry protocol.",
+      "enable": "Your radio system uses $1 telemetry.",
+      "disable": "Your radio uses a different telemetry protocol."
+    },
+    {
+      "match": "^USE_RX_(CC2500|FRSKY_SPI|FLYSKY|SFHSS|REDPINE|SPEKTRUM|SX127X|SX1280|EXPRESSLRS|NRF24|CX10|H8_3D|INAV|KN|SYMA|V202|XN297)(.*)$",
+      "category": "SPI receiver",
+      "level": "niche",
+      "title": "$1$2 SPI receiver",
+      "summary": "Support for a receiver chip wired directly to the flight controller's SPI bus (built-in receiver).",
+      "enable": "Your board has an on-board $1 receiver chip.",
+      "disable": "Helicopter boards almost always use an external serial receiver instead."
+    },
+    {
+      "match": "^USE_SPEKTRUM_(.+)$",
+      "category": "Receiver protocol",
+      "level": "niche",
+      "title": "Spektrum $1",
+      "summary": "Extra Spektrum receiver feature ($1).",
+      "enable": "You fly a Spektrum receiver and want this feature.",
+      "disable": "You do not use Spektrum."
+    },
+    {
+      "match": "^USE_FAKE_(.+)$",
+      "category": "Simulation",
+      "level": "dev",
+      "title": "Fake $1",
+      "summary": "A simulated $1 device for the SITL simulator and bench testing.",
+      "enable": "Only for simulator or bench-test builds.",
+      "disable": "Never in flight firmware: it reports made-up sensor data."
+    },
+    {
+      "match": "^USE_(H7_.+|HAL_PCD_.+|ADC3_DIRECT_HAL_INIT)$",
+      "category": "MCU platform",
+      "level": "platform",
+      "title": "$1",
+      "summary": "MCU-specific platform code (ST HAL / startup workaround).",
+      "enable": "Set automatically for the MCU that needs it.",
+      "disable": "Never toggle by hand."
+    },
+    {
+      "match": "^USE_(USB_.+|ULPI_PHY|EMBEDDED_PHY|I2C_PHY|HOST_MODE|DEVICE_MODE)$",
+      "category": "MCU platform",
+      "level": "platform",
+      "title": "USB stack: $1",
+      "summary": "USB controller and stack configuration for a particular MCU family.",
+      "enable": "Set by the MCU's USB stack.",
+      "disable": "Never toggle by hand: it must match the USB hardware."
+    },
+    {
+      "match": "^USE_VTX_(.+)$",
+      "category": "FPV video",
+      "level": "optional",
+      "title": "VTX $1",
+      "summary": "Video transmitter control ($1).",
+      "enable": "You fly FPV with a controllable video transmitter.",
+      "disable": "No FPV video transmitter. Very rarely used on helicopters."
+    },
+    {
+      "match": "^USE_OSD_(.+)$",
+      "category": "FPV video",
+      "level": "optional",
+      "title": "OSD $1",
+      "summary": "On-screen display feature: $1.",
+      "enable": "You fly FPV and use the OSD.",
+      "disable": "No FPV goggles or OSD in your setup."
+    },
+    {
+      "match": "^USE_CMS_(.+)$",
+      "category": "On-screen menus",
+      "level": "optional",
+      "title": "CMS menu: $1",
+      "summary": "An extra menu in the stick-driven on-screen configuration menus.",
+      "enable": "You configure the model from goggles or the radio screen.",
+      "disable": "You only use the Configurator or Lua scripts."
+    },
+    {
+      "match": "^USE_GPS_(.+)$",
+      "category": "GPS",
+      "level": "optional",
+      "title": "GPS: $1",
+      "summary": "GPS sub-feature: $1.",
+      "enable": "You fit a GPS and use this sub-feature.",
+      "disable": "No GPS fitted."
+    },
+    {
+      "match": "^USE_SERIAL_4WAY_(.+)$",
+      "category": "ESC tools",
+      "level": "recommended",
+      "title": "4-way interface: $1",
+      "summary": "Lets ESC configuration tools talk to the ESCs through the flight controller.",
+      "enable": "You configure or flash ESCs through the FC.",
+      "disable": "Your ESCs are programmed another way, e.g. a dedicated programming card."
+    }
+  ],
+  "options": {
+    "USE_GYRO": {
+      "title": "Gyro",
+      "category": "Core",
+      "level": "core",
+      "summary": "Gyro sensor support: the input every stabilisation loop is built on.",
+      "enable": "Always.",
+      "disable": "Never: a flight controller without a gyro cannot fly."
+    },
+    "USE_ACC": {
+      "title": "Accelerometer",
+      "category": "Core",
+      "level": "core",
+      "summary": "Accelerometer support, used for attitude estimation, self-levelling and rescue.",
+      "enable": "Needed for rescue, angle/horizon modes and attitude in logs and OSD.",
+      "disable": "Removing it disables rescue and every levelling mode."
+    },
+    "USE_MOTOR": {
+      "title": "Motor output",
+      "category": "Core",
+      "level": "core",
+      "summary": "Motor output driver framework.",
+      "enable": "Always.",
+      "disable": "Never."
+    },
+    "USE_SERVOS": {
+      "title": "Servo output",
+      "category": "Core",
+      "level": "core",
+      "summary": "Servo outputs: swashplate and tail control on a helicopter.",
+      "enable": "Always for a helicopter.",
+      "disable": "Never for a helicopter."
+    },
+    "USE_PWM_OUTPUT": {
+      "title": "PWM output",
+      "category": "Core",
+      "level": "core",
+      "summary": "Timer-driven PWM outputs for servos and motors.",
+      "enable": "Always.",
+      "disable": "Never."
+    },
+    "USE_PWM": {
+      "title": "PWM receiver input",
+      "category": "Receiver protocol",
+      "level": "niche",
+      "summary": "Reads a receiver that has one PWM wire per channel.",
+      "enable": "You use an old-style PWM receiver.",
+      "disable": "You use a serial receiver (the normal case)."
+    },
+    "USE_PPM": {
+      "title": "PPM receiver input",
+      "category": "Receiver protocol",
+      "level": "niche",
+      "summary": "Reads a single-wire PPM-sum receiver signal.",
+      "enable": "You use a PPM receiver.",
+      "disable": "You use a serial receiver."
+    },
+    "USE_TIMER": {
+      "title": "Hardware timers",
+      "category": "Core",
+      "level": "core",
+      "summary": "MCU timer support behind every PWM, DShot and frequency input.",
+      "enable": "Always.",
+      "disable": "Never."
+    },
+    "USE_TIMER_MGMT": {
+      "title": "Timer resource management",
+      "category": "Core",
+      "level": "core",
+      "summary": "Lets the CLI and board configs remap timers to pins.",
+      "enable": "Unified targets depend on it.",
+      "disable": "Board configs would no longer apply."
+    },
+    "USE_DMA": {
+      "title": "DMA",
+      "category": "Core",
+      "level": "core",
+      "summary": "Direct memory access, used by DShot, SPI, LED strip and more.",
+      "enable": "Always.",
+      "disable": "Never."
+    },
+    "USE_DMA_SPEC": {
+      "title": "DMA mapping",
+      "category": "Core",
+      "level": "core",
+      "summary": "Lets board configs choose DMA streams per peripheral.",
+      "enable": "Unified targets depend on it.",
+      "disable": "Board configs would no longer apply."
+    },
+    "USE_TIMER_DMA": {
+      "title": "Timer DMA",
+      "category": "Core",
+      "level": "core",
+      "summary": "DMA-driven timer outputs (DShot, LED strip).",
+      "enable": "Needed for DShot.",
+      "disable": "Breaks DShot."
+    },
+    "USE_ADC": {
+      "title": "ADC",
+      "category": "Core",
+      "level": "core",
+      "summary": "Analog inputs: battery voltage, current sensor, BEC voltage.",
+      "enable": "Always.",
+      "disable": "Loses all voltage and current sensing."
+    },
+    "USE_SPI": {
+      "title": "SPI",
+      "category": "Core",
+      "level": "core",
+      "summary": "SPI bus support, which the gyro and flash chips sit on.",
+      "enable": "Always.",
+      "disable": "Never: the gyro would be unreachable."
+    },
+    "USE_I2C": {
+      "title": "I2C",
+      "category": "Core",
+      "level": "recommended",
+      "summary": "I2C bus support for baro, compass and OLED displays.",
+      "enable": "Most boards wire a baro or external sensors to I2C.",
+      "disable": "Only if nothing on the board or model uses I2C."
+    },
+    "USE_UART": {
+      "title": "UARTs",
+      "category": "Core",
+      "level": "core",
+      "summary": "Hardware serial port support.",
+      "enable": "Always.",
+      "disable": "Never: the receiver and telemetry use UARTs."
+    },
+    "USE_VCP": {
+      "title": "USB serial (VCP)",
+      "category": "Core",
+      "level": "core",
+      "summary": "The USB virtual COM port the Configurator connects through.",
+      "enable": "Always.",
+      "disable": "Never: you would lose USB configuration."
+    },
+    "USE_CLI": {
+      "title": "CLI",
+      "category": "Core",
+      "level": "core",
+      "summary": "The command-line interface used by the Configurator's CLI tab, diff/dump and board configs.",
+      "enable": "Always.",
+      "disable": "Never: backups, presets and board configs all go through it."
+    },
+    "USE_CLI_BATCH": {
+      "title": "CLI batch mode",
+      "category": "Configuration",
+      "level": "recommended",
+      "summary": "Applies a pasted CLI diff as one batch, aborting cleanly on errors.",
+      "enable": "Restoring backups and presets relies on it.",
+      "disable": "Small saving, but makes restores fragile."
+    },
+    "USE_SERIAL_RX": {
+      "title": "Serial receivers",
+      "category": "Core",
+      "level": "core",
+      "summary": "The framework for every serial receiver protocol.",
+      "enable": "Always: nearly every modern receiver is serial.",
+      "disable": "Never."
+    },
+    "USE_PARAMETER_GROUPS": {
+      "title": "Parameter groups",
+      "category": "Core",
+      "level": "core",
+      "summary": "The settings storage system.",
+      "enable": "Always.",
+      "disable": "Never."
+    },
+    "USE_IMU_CALC": {
+      "title": "Attitude estimation",
+      "category": "Core",
+      "level": "core",
+      "summary": "Computes the model's attitude from gyro and accelerometer.",
+      "enable": "Always.",
+      "disable": "Never."
+    },
+    "USE_RESOURCE_MGMT": {
+      "title": "Resource remapping",
+      "category": "Core",
+      "level": "core",
+      "summary": "The CLI 'resource' command that maps functions to pins.",
+      "enable": "Unified-target board configs are made of resource commands.",
+      "disable": "Board configs would no longer apply."
+    },
+    "USE_UNIFIED_TARGET": {
+      "title": "Unified target",
+      "category": "Core",
+      "level": "core",
+      "summary": "Marks this as a unified (one firmware, many boards) build.",
+      "enable": "Always for STM32xxx targets.",
+      "disable": "Never."
+    },
+    "USE_CUSTOM_DEFAULTS": {
+      "title": "Board config defaults",
+      "category": "Core",
+      "level": "core",
+      "summary": "Stores the board's config (pins, sensors) in flash so a unified target knows what board it is on.",
+      "enable": "Always for unified targets.",
+      "disable": "The board would boot unconfigured."
+    },
+    "USE_CUSTOM_DEFAULTS_ADDRESS": {
+      "title": "Board config location",
+      "category": "Core",
+      "level": "core",
+      "summary": "Fixed flash location for the board config.",
+      "enable": "Always for unified targets.",
+      "disable": "Never."
+    },
+    "USE_BOARD_INFO": {
+      "title": "Board info",
+      "category": "Core",
+      "level": "core",
+      "summary": "Stores the board name and manufacturer ID. This is what 'Detect board' reads.",
+      "enable": "Board detection and board configs rely on it.",
+      "disable": "Board detection stops working."
+    },
+    "USE_SIGNATURE": {
+      "title": "Board signature",
+      "category": "Configuration",
+      "level": "recommended",
+      "summary": "A per-board signature stored alongside the board info.",
+      "enable": "Used by the Configurator's board identification.",
+      "disable": "Small saving; the Configurator loses the signature."
+    },
+    "USE_DSHOT": {
+      "title": "DShot",
+      "category": "ESC / motor",
+      "level": "recommended",
+      "summary": "The digital DShot ESC protocol.",
+      "enable": "Your main or tail ESC is driven by DShot.",
+      "disable": "Your ESCs use PWM throttle (common on helicopters). DShot telemetry and the RPM filter depend on it."
+    },
+    "USE_DSHOT_TELEMETRY": {
+      "title": "Bidirectional DShot",
+      "category": "ESC / motor",
+      "level": "recommended",
+      "summary": "Reads motor RPM back over the DShot signal wire.",
+      "enable": "It feeds the RPM filter and governor from DShot ESCs.",
+      "disable": "No DShot ESCs; RPM comes from ESC telemetry or a frequency sensor instead."
+    },
+    "USE_DSHOT_TELEMETRY_STATS": {
+      "title": "DShot telemetry stats",
+      "category": "ESC / motor",
+      "level": "optional",
+      "summary": "Error-rate statistics for bidirectional DShot.",
+      "enable": "Diagnosing DShot signal problems.",
+      "disable": "Small saving when DShot works fine."
+    },
+    "USE_DSHOT_BITBANG": {
+      "title": "Bitbanged DShot",
+      "category": "ESC / motor",
+      "level": "recommended",
+      "summary": "DShot produced by GPIO bit-banging, freeing timers.",
+      "enable": "Many boards need it for bidirectional DShot.",
+      "disable": "Only if DShot is not used."
+    },
+    "USE_DSHOT_DMAR": {
+      "title": "DShot burst DMA",
+      "category": "ESC / motor",
+      "level": "optional",
+      "summary": "Timer burst-DMA DShot output.",
+      "enable": "When the board's timer and DMA layout calls for it.",
+      "disable": "If DShot is not used."
+    },
+    "USE_RPM_FILTER": {
+      "title": "RPM filter",
+      "category": "Filtering",
+      "level": "recommended",
+      "summary": "Notch filters that track headspeed and tail RPM to remove rotor and motor vibration from the gyro.",
+      "enable": "Strongly recommended for helicopters. It needs an RPM source.",
+      "disable": "No RPM source available. You lose the most effective vibration filter."
+    },
+    "USE_DYN_NOTCH_FILTER": {
+      "title": "Dynamic notch",
+      "category": "Filtering",
+      "level": "recommended",
+      "summary": "FFT-based notch that finds and removes vibration peaks automatically.",
+      "enable": "Useful with or without an RPM source.",
+      "disable": "Saves CPU and flash if your RPM filter covers everything."
+    },
+    "USE_DYN_LPF": {
+      "title": "Dynamic low-pass",
+      "category": "Filtering",
+      "level": "optional",
+      "summary": "Low-pass filter whose cutoff moves with throttle.",
+      "enable": "Your tune uses dynamic LPF.",
+      "disable": "Your tune uses static filters."
+    },
+    "USE_GYRO_LPF2": {
+      "title": "Second gyro low-pass",
+      "category": "Filtering",
+      "level": "optional",
+      "summary": "An extra gyro low-pass filter stage.",
+      "enable": "Your tune uses the second LPF.",
+      "disable": "Your tune leaves it off."
+    },
+    "USE_GYRO_OVERFLOW_CHECK": {
+      "title": "Gyro overflow check",
+      "category": "Safety",
+      "level": "recommended",
+      "summary": "Detects gyro readings that wrap around on violent rotation.",
+      "enable": "Safety net against crash-induced flyaways.",
+      "disable": "Tiny saving; not worth it."
+    },
+    "USE_FREQ_SENSOR": {
+      "title": "Frequency sensor",
+      "category": "RPM sensing",
+      "level": "recommended",
+      "summary": "Measures RPM from a pulse or phase signal on an input pin (Rotorflight).",
+      "enable": "Your headspeed or tail RPM comes from a frequency sensor or an ESC RPM output wire.",
+      "disable": "RPM comes from DShot or ESC telemetry instead."
+    },
+    "USE_ESC_SENSOR": {
+      "title": "ESC telemetry",
+      "category": "ESC / motor",
+      "level": "recommended",
+      "summary": "Reads serial telemetry (RPM, voltage, current, temperature) from the ESC. Rotorflight supports many helicopter ESC protocols.",
+      "enable": "Your ESC has a telemetry wire. It is a common RPM source for the governor and RPM filter.",
+      "disable": "Your ESC has no telemetry."
+    },
+    "USE_ESC_SENSOR_TELEMETRY": {
+      "title": "Forward ESC telemetry",
+      "category": "Telemetry",
+      "level": "optional",
+      "summary": "Passes ESC sensor values on to radio telemetry.",
+      "enable": "You want ESC data on the transmitter.",
+      "disable": "No ESC telemetry, or you do not display it."
+    },
+    "USE_TELEMETRY": {
+      "title": "Telemetry",
+      "category": "Telemetry",
+      "level": "recommended",
+      "summary": "The framework for all radio telemetry protocols.",
+      "enable": "Almost every setup sends telemetry to the radio.",
+      "disable": "Removes every telemetry protocol."
+    },
+    "USE_TELEMETRY_CRSF": {
+      "title": "CRSF telemetry",
+      "category": "Telemetry",
+      "level": "recommended",
+      "summary": "Telemetry for Crossfire and ExpressLRS receivers.",
+      "enable": "You fly CRSF or ELRS (very common).",
+      "disable": "You use another radio system."
+    },
+    "USE_TELEMETRY_SMARTPORT": {
+      "title": "FrSky S.Port telemetry",
+      "category": "Telemetry",
+      "level": "optional",
+      "summary": "FrSky Smart Port telemetry.",
+      "enable": "You use an FrSky receiver.",
+      "disable": "You do not."
+    },
+    "USE_TELEMETRY_SBUS2": {
+      "title": "Futaba SBUS2 telemetry",
+      "category": "Telemetry",
+      "level": "optional",
+      "summary": "Futaba SBUS2 telemetry slots.",
+      "enable": "You fly Futaba with an SBUS2 receiver.",
+      "disable": "You do not."
+    },
+    "USE_TELEMETRY_CASTLE": {
+      "title": "Castle Link telemetry",
+      "category": "ESC / motor",
+      "level": "niche",
+      "summary": "Reads Castle Creations ESC telemetry over the throttle signal (Castle Link).",
+      "enable": "You use a Castle ESC with Link telemetry.",
+      "disable": "No Castle ESC."
+    },
+    "USE_SMARTFUEL": {
+      "title": "Smart fuel",
+      "category": "Battery",
+      "level": "optional",
+      "summary": "Estimates remaining battery capacity from voltage and current (Rotorflight).",
+      "enable": "You want a fuel percentage on the radio or OSD.",
+      "disable": "You do not use a fuel gauge."
+    },
+    "USE_SBUS_OUTPUT": {
+      "title": "SBUS output",
+      "category": "Servo bus",
+      "level": "optional",
+      "summary": "Drives servos or other devices with an SBUS signal from the FC (Rotorflight).",
+      "enable": "You run SBUS servos or an SBUS-input device from the FC.",
+      "disable": "Servos are on ordinary PWM outputs."
+    },
+    "USE_FBUS_MASTER": {
+      "title": "FBUS master",
+      "category": "Servo bus",
+      "level": "niche",
+      "summary": "FrSky FBUS master: drives FBUS servos and collects sensor data on one wire (Rotorflight).",
+      "enable": "You use FrSky FBUS servos or sensors.",
+      "disable": "You do not."
+    },
+    "USE_SPORT_MASTER": {
+      "title": "S.Port master",
+      "category": "Telemetry",
+      "level": "niche",
+      "summary": "Polls FrSky S.Port sensors connected to the FC (Rotorflight).",
+      "enable": "You plug FrSky sensors into the FC.",
+      "disable": "You do not."
+    },
+    "USE_BUS_SERVO": {
+      "title": "Bus servo",
+      "category": "Servo bus",
+      "level": "optional",
+      "summary": "Shared configuration for bus-driven servos (SBUS/FBUS output). Derived automatically.",
+      "enable": "Defined automatically when SBUS output or FBUS master is on.",
+      "disable": "Follows those features."
+    },
+    "USE_SERVO_GEOMETRY_CORRECTION": {
+      "title": "Servo geometry correction",
+      "category": "Helicopter",
+      "level": "recommended",
+      "summary": "Corrects servo-arm geometry for linear swashplate movement (Rotorflight).",
+      "enable": "Improves swashplate linearity on most helicopters.",
+      "disable": "Small saving; you lose the correction."
+    },
+    "USE_ACRO_TRAINER": {
+      "title": "Acro trainer",
+      "category": "Flight modes",
+      "level": "optional",
+      "summary": "Limits bank angle in acro mode for training.",
+      "enable": "You are learning to fly acro.",
+      "disable": "Experienced pilots rarely use it."
+    },
+    "USE_BLACKBOX": {
+      "title": "Blackbox logging",
+      "category": "Logging",
+      "level": "recommended",
+      "summary": "High-rate flight logging to flash, SD card or serial.",
+      "enable": "Essential for tuning and diagnosing problems.",
+      "disable": "Large saving, but you lose your main diagnostic tool."
+    },
+    "USE_FLASHFS": {
+      "title": "Flash filesystem",
+      "category": "Logging",
+      "level": "recommended",
+      "summary": "The filesystem on the onboard flash chip, used for blackbox logs.",
+      "enable": "Your board logs to onboard flash.",
+      "disable": "No onboard flash chip."
+    },
+    "USE_SDCARD": {
+      "title": "SD card",
+      "category": "Logging",
+      "level": "hardware",
+      "summary": "SD card support for blackbox logs.",
+      "enable": "Your board has an SD card slot.",
+      "disable": "No SD slot."
+    },
+    "USE_USB_MSC": {
+      "title": "USB mass storage",
+      "category": "Logging",
+      "level": "optional",
+      "summary": "Mounts the log flash or SD card as a USB drive to download logs.",
+      "enable": "Fast log download.",
+      "disable": "Logs can still be downloaded through the Configurator, just slower."
+    },
+    "USE_GPS": {
+      "title": "GPS",
+      "category": "GPS",
+      "level": "optional",
+      "summary": "GPS receiver support: speed, position and altitude for telemetry, logs and OSD.",
+      "enable": "You fit a GPS (speed runs, logging, telemetry).",
+      "disable": "No GPS fitted. A large and common strip candidate."
+    },
+    "USE_GPS_RESCUE": {
+      "title": "GPS rescue",
+      "category": "GPS",
+      "level": "optional",
+      "summary": "Return-to-home failsafe inherited from Betaflight.",
+      "enable": "Only if you rely on GPS return-to-home. Check that your Rotorflight version exposes it.",
+      "disable": "Helicopters normally use the attitude-based rescue instead."
+    },
+    "USE_LED_STRIP": {
+      "title": "LED strip",
+      "category": "Lighting",
+      "level": "optional",
+      "summary": "Addressable (WS2812) LED strip control.",
+      "enable": "You fit LED strips for orientation or status.",
+      "disable": "No LEDs. Measured at about 11 KB on STM32F405."
+    },
+    "USE_LED_STRIP_STATUS_MODE": {
+      "title": "LED status mode",
+      "category": "Lighting",
+      "level": "optional",
+      "summary": "The LED strip 'status' mode (warnings, flight-mode colours).",
+      "enable": "You use LED status colours.",
+      "disable": "No LED strip; removed automatically with it."
+    },
+    "USE_BEEPER": {
+      "title": "Beeper",
+      "category": "Alerts",
+      "level": "recommended",
+      "summary": "Buzzer support for arming, low-battery and lost-model alerts.",
+      "enable": "Lost-model beeping alone justifies it.",
+      "disable": "Tiny saving."
+    },
+    "USE_OSD": {
+      "title": "OSD",
+      "category": "FPV video",
+      "level": "optional",
+      "summary": "On-screen display overlay for FPV video.",
+      "enable": "You fly FPV.",
+      "disable": "No FPV. Large saving."
+    },
+    "USE_CMS": {
+      "title": "On-screen menus (CMS)",
+      "category": "On-screen menus",
+      "level": "optional",
+      "summary": "Stick-driven configuration menus shown in goggles or on the radio.",
+      "enable": "You change settings from the field without a computer.",
+      "disable": "You only use the Configurator or Lua scripts."
+    },
+    "USE_MSP_DISPLAYPORT": {
+      "title": "MSP DisplayPort",
+      "category": "FPV video",
+      "level": "optional",
+      "summary": "Draws OSD and menus on digital FPV systems over MSP.",
+      "enable": "Digital FPV (DJI/Walksnail/HDZero) OSD.",
+      "disable": "No digital FPV."
+    },
+    "USE_MSP_OVER_TELEMETRY": {
+      "title": "MSP over telemetry",
+      "category": "Configuration",
+      "level": "recommended",
+      "summary": "Carries Configurator (MSP) messages over the radio link. This is how the Rotorflight Lua scripts on your transmitter work.",
+      "enable": "You tune from the transmitter with the Lua scripts.",
+      "disable": "You never use the transmitter scripts."
+    },
+    "USE_RX_MSP": {
+      "title": "MSP receiver",
+      "category": "Receiver protocol",
+      "level": "niche",
+      "summary": "Accepts stick input over MSP.",
+      "enable": "Testing, or a companion computer sending stick commands.",
+      "disable": "Normal radios do not need it."
+    },
+    "USE_CRSF_LINK_STATISTICS": {
+      "title": "CRSF link statistics",
+      "category": "Receiver protocol",
+      "level": "recommended",
+      "summary": "Uses CRSF/ELRS link-quality frames for RSSI and LQ.",
+      "enable": "You fly CRSF or ELRS.",
+      "disable": "Another radio system."
+    },
+    "USE_RX_RSSI_DBM": {
+      "title": "RSSI in dBm",
+      "category": "Receiver protocol",
+      "level": "optional",
+      "summary": "Reports receiver signal strength in dBm.",
+      "enable": "CRSF/ELRS users who log or display RSSI.",
+      "disable": "Small saving."
+    },
+    "USE_SERIAL_PASSTHROUGH": {
+      "title": "Serial passthrough",
+      "category": "Configuration",
+      "level": "recommended",
+      "summary": "Bridges USB to a UART so tools can reach a receiver, ESC or GPS behind the FC.",
+      "enable": "Flashing receivers or configuring ESCs and GPS through the FC.",
+      "disable": "Tiny saving."
+    },
+    "USE_BLHELI_FORWARD_PROGRAMMING": {
+      "title": "BLHeli forward programming",
+      "category": "ESC tools",
+      "level": "optional",
+      "summary": "Programs BLHeli ESCs through the FC.",
+      "enable": "You run BLHeli ESCs.",
+      "disable": "No BLHeli ESCs."
+    },
+    "USE_AM32_FORWARD_PROGRAMMING": {
+      "title": "AM32 forward programming",
+      "category": "ESC tools",
+      "level": "optional",
+      "summary": "Programs AM32 ESCs through the FC.",
+      "enable": "You run AM32 ESCs.",
+      "disable": "No AM32 ESCs."
+    },
+    "USE_ESCSERIAL": {
+      "title": "ESC serial",
+      "category": "ESC tools",
+      "level": "optional",
+      "summary": "Serial link to ESC bootloaders for flashing.",
+      "enable": "You flash ESC firmware through the FC.",
+      "disable": "You never do."
+    },
+    "USE_ESCSERIAL_SIMONK": {
+      "title": "SimonK ESC serial",
+      "category": "ESC tools",
+      "level": "niche",
+      "summary": "Flashing support for legacy SimonK ESCs.",
+      "enable": "You still use SimonK ESCs.",
+      "disable": "Almost nobody does."
+    },
+    "USE_PINIO": {
+      "title": "PINIO",
+      "category": "Outputs",
+      "level": "optional",
+      "summary": "User-controlled GPIO pins, e.g. to switch a VTX or camera power.",
+      "enable": "Your board has switchable power pads you use.",
+      "disable": "You do not switch anything."
+    },
+    "USE_PINIOBOX": {
+      "title": "PINIO modes",
+      "category": "Outputs",
+      "level": "optional",
+      "summary": "Maps PINIO pins to switch modes.",
+      "enable": "You use PINIO from a switch.",
+      "disable": "You do not use PINIO."
+    },
+    "USE_DASHBOARD": {
+      "title": "OLED dashboard",
+      "category": "Displays",
+      "level": "niche",
+      "summary": "Status pages on a small I2C OLED display.",
+      "enable": "You fit an I2C OLED.",
+      "disable": "Almost nobody does."
+    },
+    "USE_MULTI_GYRO": {
+      "title": "Multiple gyros",
+      "category": "Sensors",
+      "level": "hardware",
+      "summary": "Uses two gyro chips on boards that have them.",
+      "enable": "Your board has dual gyros.",
+      "disable": "Single-gyro board."
+    },
+    "USE_PERSISTENT_STATS": {
+      "title": "Persistent stats",
+      "category": "Configuration",
+      "level": "optional",
+      "summary": "Keeps lifetime flight-count and flight-time statistics.",
+      "enable": "You like model statistics.",
+      "disable": "Small saving."
+    },
+    "USE_PROFILE_NAMES": {
+      "title": "Profile names",
+      "category": "Configuration",
+      "level": "optional",
+      "summary": "Lets you name PID and rate profiles.",
+      "enable": "You use several named profiles.",
+      "disable": "Small saving."
+    },
+    "USE_CUSTOM_BOX_NAMES": {
+      "title": "Custom mode names",
+      "category": "Configuration",
+      "level": "optional",
+      "summary": "User-defined names for modes.",
+      "enable": "You rename modes.",
+      "disable": "Small saving."
+    },
+    "USE_RTC_TIME": {
+      "title": "Real-time clock",
+      "category": "Configuration",
+      "level": "recommended",
+      "summary": "Keeps wall-clock time (set by the Configurator or GPS) for log timestamps.",
+      "enable": "Blackbox logs get real dates.",
+      "disable": "Logs get no real timestamps."
+    },
+    "USE_HUFFMAN": {
+      "title": "Huffman compression",
+      "category": "Configuration",
+      "level": "optional",
+      "summary": "Compresses MSP data, e.g. for faster log download.",
+      "enable": "Faster flash log download.",
+      "disable": "Small saving."
+    },
+    "USE_SENSOR_NAMES": {
+      "title": "Sensor names",
+      "category": "Configuration",
+      "level": "optional",
+      "summary": "Reports sensor chip names to the Configurator.",
+      "enable": "Shows which gyro and baro were detected.",
+      "disable": "Small saving."
+    },
+    "USE_VARIO": {
+      "title": "Vario",
+      "category": "Telemetry",
+      "level": "optional",
+      "summary": "Climb-rate (variometer) calculation.",
+      "enable": "You fit a baro or GPS and want vario telemetry.",
+      "disable": "No baro or GPS."
+    },
+    "USE_RANGEFINDER": {
+      "title": "Rangefinder",
+      "category": "Sensors",
+      "level": "niche",
+      "summary": "Distance-sensor (sonar/lidar) support. Off by default on every target.",
+      "enable": "Experimental: you fit a supported rangefinder.",
+      "disable": "Measured at about 1.7 KB on STM32F405 (with HC-SR04)."
+    },
+    "USE_CAMERA_CONTROL": {
+      "title": "Camera control",
+      "category": "FPV video",
+      "level": "niche",
+      "summary": "Emulates FPV camera OSD-menu button presses.",
+      "enable": "FPV camera menu control.",
+      "disable": "Not used on helicopters."
+    },
+    "USE_RCDEVICE": {
+      "title": "RunCam device protocol",
+      "category": "FPV video",
+      "level": "niche",
+      "summary": "Controls RunCam cameras over serial.",
+      "enable": "RunCam camera control.",
+      "disable": "Not used on helicopters."
+    },
+    "USE_CANVAS": {
+      "title": "OSD canvas",
+      "category": "FPV video",
+      "level": "optional",
+      "summary": "Drawing primitives for OSD systems that support them.",
+      "enable": "Your OSD system uses canvas drawing.",
+      "disable": "No OSD."
+    },
+    "USE_FRSKYOSD": {
+      "title": "FrSky OSD",
+      "category": "FPV video",
+      "level": "niche",
+      "summary": "Support for the FrSky OSD module.",
+      "enable": "You use a FrSky OSD.",
+      "disable": "You do not."
+    },
+    "USE_HOTT_TEXTMODE": {
+      "title": "HoTT text mode",
+      "category": "Telemetry",
+      "level": "niche",
+      "summary": "Graupner HoTT text-menu configuration from the transmitter.",
+      "enable": "You fly Graupner HoTT.",
+      "disable": "You do not."
+    },
+    "USE_I2C_OLED_DISPLAY": {
+      "title": "I2C OLED display",
+      "category": "Displays",
+      "level": "niche",
+      "summary": "Driver for small I2C OLED displays.",
+      "enable": "You fit one.",
+      "disable": "Almost nobody does."
+    },
+    "USE_BST": {
+      "title": "TBS BST bus",
+      "category": "Telemetry",
+      "level": "niche",
+      "summary": "Team BlackSheep BST I2C bus (old Crossfire and Core PNP).",
+      "enable": "Legacy TBS gear.",
+      "disable": "Effectively obsolete."
+    },
+    "USE_BUTTONS": {
+      "title": "Board buttons",
+      "category": "Hardware",
+      "level": "hardware",
+      "summary": "Support for physical buttons on the board.",
+      "enable": "The board has buttons, e.g. a bind button.",
+      "disable": "No buttons."
+    },
+    "USE_RX_SPI": {
+      "title": "SPI receiver",
+      "category": "SPI receiver",
+      "level": "niche",
+      "summary": "Framework for receiver chips wired to SPI.",
+      "enable": "Board with a built-in receiver chip.",
+      "disable": "External receiver (the normal case)."
+    },
+    "USE_INVERTER": {
+      "title": "Serial inverter",
+      "category": "Hardware",
+      "level": "hardware",
+      "summary": "Drives an external signal inverter. F4 UARTs cannot invert in hardware, so SBUS needs one.",
+      "enable": "F4 boards with an SBUS inverter.",
+      "disable": "F7, H7 and G4 invert in hardware."
+    },
+    "USE_SOFTSERIAL1": {
+      "title": "Soft serial 1",
+      "category": "MCU peripheral",
+      "level": "optional",
+      "summary": "A serial port bit-banged on a timer pin.",
+      "enable": "You need one more serial port than the MCU has.",
+      "disable": "You have enough UARTs."
+    },
+    "USE_SOFTSERIAL2": {
+      "title": "Soft serial 2",
+      "category": "MCU peripheral",
+      "level": "optional",
+      "summary": "A second bit-banged serial port.",
+      "enable": "You need two extra serial ports.",
+      "disable": "You have enough UARTs."
+    },
+    "USE_SERIAL_PINSWAP": {
+      "title": "UART pin swap",
+      "category": "MCU peripheral",
+      "level": "platform",
+      "summary": "Swaps UART TX/RX pins in hardware. Not available on F4.",
+      "enable": "Set for MCUs whose UARTs support it.",
+      "disable": "Not a per-build choice."
+    },
+    "USE_CONFIG_ERASE": {
+      "title": "Config erase marker",
+      "category": "Build",
+      "level": "platform",
+      "summary": "Set by the release build (FLASH_CONFIG_ERASE=yes). Erases stored settings on first boot after flashing.",
+      "enable": "Use the FLASH_CONFIG_ERASE checkbox, not this toggle.",
+      "disable": "Controlled by that checkbox."
+    },
+    "USE_EXST": {
+      "title": "External storage boot (EXST)",
+      "category": "Build",
+      "level": "platform",
+      "summary": "Builds for boards that run firmware from external flash (some H7). Set by the build with EXST=yes.",
+      "enable": "Only for EXST boards, via the make variable.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_STDPERIPH_DRIVER": {
+      "title": "ST Standard Peripheral Library",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "The legacy ST driver library that F4 builds use. Set by the build.",
+      "enable": "Set automatically for F4.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_HAL_DRIVER": {
+      "title": "ST HAL (Hardware Abstraction Layer)",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "ST's HAL driver library. F7, H7 and G4 builds are written against it, and make/mcu/*.mk sets it for them.",
+      "enable": "Set automatically for F7/H7/G4. Required there.",
+      "disable": "Never toggle by hand. It does not apply to F4, which uses StdPeriph."
+    },
+    "USE_FULL_LL_DRIVER": {
+      "title": "ST Low-Layer drivers",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "ST's low-layer (LL) drivers, set with HAL for F7/H7/G4 by make/mcu/*.mk.",
+      "enable": "Set automatically for F7/H7/G4.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_ITCM_RAM": {
+      "title": "ITCM RAM",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Places hot code in tightly-coupled instruction RAM (F7/H7).",
+      "enable": "Set by the MCU's memory layout.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_CCM_CODE": {
+      "title": "CCM RAM code",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Places code in core-coupled RAM (MCUs that have CCM).",
+      "enable": "Set by the MCU's memory layout.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_DMA_RAM": {
+      "title": "DMA RAM region",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Separate RAM region for DMA buffers (H7/G4 memory layout).",
+      "enable": "Set by the MCU's memory layout.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_FAST_DATA": {
+      "title": "Fast data RAM",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Places hot data in the fastest RAM.",
+      "enable": "Set by the MCU's memory layout.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_OVERCLOCK": {
+      "title": "Overclock",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Allows running the MCU above its rated clock.",
+      "enable": "Leave as the target defines it.",
+      "disable": "Not a feature toggle."
+    },
+    "USE_ADC_INTERNAL": {
+      "title": "Internal ADC channels",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "MCU temperature and reference-voltage readings.",
+      "enable": "Set per MCU.",
+      "disable": "Not a feature toggle."
+    },
+    "USE_MCO": {
+      "title": "Clock output (MCO)",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Outputs an MCU clock on a pin.",
+      "enable": "Set per board or MCU.",
+      "disable": "Not a feature toggle."
+    },
+    "USE_PERSISTENT_OBJECTS": {
+      "title": "Persistent RAM objects",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "RAM that survives a soft reset, used for reboot-to-bootloader requests.",
+      "enable": "Set per MCU.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_FLASH_TOOLS": {
+      "title": "Flash chip tools",
+      "category": "Logging",
+      "level": "recommended",
+      "summary": "Erase and usage commands for the onboard flash.",
+      "enable": "Needed to manage blackbox flash.",
+      "disable": "Only without onboard flash."
+    },
+    "USE_FLASH_CHIP": {
+      "title": "Flash chip support",
+      "category": "Logging",
+      "level": "recommended",
+      "summary": "Generic SPI flash support behind the chip drivers.",
+      "enable": "Boards with onboard flash.",
+      "disable": "Only without onboard flash."
+    },
+    "USE_FLASHFS_LOOP": {
+      "title": "Looping flash log",
+      "category": "Logging",
+      "level": "optional",
+      "summary": "Overwrites the oldest blackbox data when the flash is full.",
+      "enable": "Always-on logging without manual erasing.",
+      "disable": "Small saving."
+    },
+    "USE_GYRO_REGISTER_DUMP": {
+      "title": "Gyro register dump",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "CLI command that dumps gyro chip registers.",
+      "enable": "Debugging gyro setup.",
+      "disable": "Not needed for flying. Small saving."
+    },
+    "USE_LATE_TASK_STATISTICS": {
+      "title": "Late task statistics",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Scheduler statistics about tasks that ran late.",
+      "enable": "Diagnosing CPU load problems.",
+      "disable": "Not needed for flying."
+    },
+    "USE_MIXER_HISTORY": {
+      "title": "Mixer history",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Keeps a history of mixer outputs for debugging.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_GYRO_SLEW_LIMITER": {
+      "title": "Gyro slew limiter",
+      "category": "Filtering",
+      "level": "niche",
+      "summary": "Clamps impossible jumps in gyro readings.",
+      "enable": "Experimental.",
+      "disable": "Off on every target."
+    },
+    "USE_DEBUG_PIN": {
+      "title": "Debug pin",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Toggles a GPIO for oscilloscope timing measurements.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_STACK_CHECK": {
+      "title": "Stack check",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Measures stack usage.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_SERIAL_PRINTF": {
+      "title": "Serial printf",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "printf debugging over a serial port.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_ITM_PRINTF": {
+      "title": "ITM printf",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "printf debugging over the SWD trace port.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_NULL_PRINTF": {
+      "title": "Null printf",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Discards debug printf output.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_CLI_DEBUG_PRINT": {
+      "title": "CLI debug print",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Debug output through the CLI.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_FULL_ASSERT": {
+      "title": "Full assert",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Enables the ST library's parameter assertions.",
+      "enable": "Developers only.",
+      "disable": "Leave off: larger and slower."
+    },
+    "USE_SMARTAUDIO_DPRINTF": {
+      "title": "SmartAudio debug print",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Debug output for VTX SmartAudio.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_OLED_GPS_DEBUG_PAGE_ONLY": {
+      "title": "OLED GPS debug page",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Shows only the GPS debug page on the OLED dashboard.",
+      "enable": "Developers only.",
+      "disable": "Leave off."
+    },
+    "USE_SMARTPORT_MASTER__WARNING_DEAD_CODE__": {
+      "title": "Old S.Port master (dead code)",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Deliberately named as dead code.",
+      "enable": "Do not.",
+      "disable": "Leave off."
+    },
+    "USE_STM3210C_EVAL": {
+      "title": "ST eval board",
+      "category": "Debug",
+      "level": "dev",
+      "summary": "Leftover from ST's USB library for their evaluation board.",
+      "enable": "Do not.",
+      "disable": "Leave off."
+    },
+    "USE_64BIT_TIME": {
+      "title": "64-bit time",
+      "category": "Build",
+      "level": "dev",
+      "summary": "Uses 64-bit timestamps internally.",
+      "enable": "Not used by any target.",
+      "disable": "Leave off."
+    },
+    "USE_TARGET_CONFIG": {
+      "title": "Target config hook",
+      "category": "Build",
+      "level": "platform",
+      "summary": "Hook for legacy (non-unified) targets to apply their own defaults.",
+      "enable": "Legacy targets only.",
+      "disable": "Not used by unified targets."
+    },
+    "USE_HARDWARE_REVISION_DETECTION": {
+      "title": "Hardware revision detection",
+      "category": "Hardware",
+      "level": "hardware",
+      "summary": "Detects the board's hardware revision (some legacy targets).",
+      "enable": "Legacy boards that need it.",
+      "disable": "Not used by unified targets."
+    },
+    "USE_QUADSPI": {
+      "title": "Quad-SPI",
+      "category": "MCU peripheral",
+      "level": "hardware",
+      "summary": "Quad-SPI flash interface (H7).",
+      "enable": "H7 boards with QSPI flash.",
+      "disable": "Not present on F4."
+    },
+    "USE_SPRACING_PERSISTENT_RTC_WORKAROUND": {
+      "title": "SPRacing RTC workaround",
+      "category": "Hardware",
+      "level": "platform",
+      "summary": "Workaround for a specific SPRacing bootloader.",
+      "enable": "Those boards only.",
+      "disable": "Leave off."
+    },
+    "USE_TXRX_LED": {
+      "title": "TX/RX LED",
+      "category": "Hardware",
+      "level": "hardware",
+      "summary": "Blinks an LED on serial activity (legacy).",
+      "enable": "Board with such an LED.",
+      "disable": "Leave off."
+    },
+    "USE_LPUART1": {
+      "title": "Low-power UART 1",
+      "category": "MCU peripheral",
+      "level": "hardware",
+      "summary": "The low-power UART found on G4 and H7 MCUs.",
+      "enable": "The MCU has an LPUART and the board uses it.",
+      "disable": "F4 and F7 have no LPUART."
+    },
+    "USE_DSHOT_CACHE_MGMT": {
+      "title": "DShot cache management",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Data-cache maintenance for DShot DMA buffers on MCUs with a D-cache (F7/H7).",
+      "enable": "Set for MCUs with a data cache.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_LEDSTRIP_CACHE_MGMT": {
+      "title": "LED strip cache management",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Data-cache maintenance for LED strip DMA buffers (F7/H7).",
+      "enable": "Set for MCUs with a data cache.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_DMA_REGISTER_CACHE": {
+      "title": "DMA register cache",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Caches DMA register setups for faster DShot (MCU-specific).",
+      "enable": "Set per MCU.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_SBUS_CHANNELS": {
+      "title": "SBUS channel decoding",
+      "category": "Receiver protocol",
+      "level": "core",
+      "summary": "Shared SBUS-style channel decoding used by SBUS, FPort and FBUS.",
+      "enable": "Needed by several receiver protocols.",
+      "disable": "Follows those protocols."
+    },
+    "USE_BARO": {
+      "title": "Barometer",
+      "category": "Sensors",
+      "level": "optional",
+      "summary": "Barometer support: altitude and vario.",
+      "enable": "Your board or model has a baro and you use altitude data.",
+      "disable": "Rarely used on helicopters. A reasonable strip candidate."
+    },
+    "USE_MAG": {
+      "title": "Magnetometer",
+      "category": "Sensors",
+      "level": "optional",
+      "summary": "Compass support.",
+      "enable": "You fit a compass, usually on a GPS module.",
+      "disable": "No compass. Rarely needed on helicopters."
+    },
+    "USE_MAX7456": {
+      "title": "Analog OSD chip (MAX7456)",
+      "category": "FPV video",
+      "level": "hardware",
+      "summary": "Driver for the analog-video OSD chip found on many F4/F7 boards.",
+      "enable": "Your board has an analog OSD chip and you fly analog FPV.",
+      "disable": "No OSD chip, or no analog FPV."
+    },
+    "USE_SDCARD_SDIO": {
+      "title": "SD card over SDIO",
+      "category": "Storage driver",
+      "level": "hardware",
+      "summary": "Fast 4-bit SDIO connection to an SD card slot.",
+      "enable": "Your board's SD slot is wired to SDIO.",
+      "disable": "No SD slot, or it is wired to SPI."
+    },
+    "USE_SDCARD_SPI": {
+      "title": "SD card over SPI",
+      "category": "Storage driver",
+      "level": "hardware",
+      "summary": "SD card slot connected over SPI.",
+      "enable": "Your board's SD slot is wired to SPI.",
+      "disable": "No SD slot, or it uses SDIO."
+    },
+    "USE_SPI_GYRO": {
+      "title": "SPI gyro bus",
+      "category": "Core",
+      "level": "core",
+      "summary": "Gyro connected over SPI: the normal arrangement on modern boards.",
+      "enable": "Almost every board.",
+      "disable": "Never on an SPI-gyro board."
+    },
+    "USE_I2C_GYRO": {
+      "title": "I2C gyro bus",
+      "category": "Sensor driver",
+      "level": "hardware",
+      "summary": "Gyro connected over I2C (old boards).",
+      "enable": "Very old boards with an I2C gyro.",
+      "disable": "Modern boards use SPI."
+    },
+    "USE_DUAL_GYRO": {
+      "title": "Dual gyro (deprecated)",
+      "category": "Build",
+      "level": "dev",
+      "summary": "Deprecated name; the firmware raises an #error if a target defines it. Replaced by USE_MULTI_GYRO.",
+      "enable": "Do not.",
+      "disable": "Leave off."
+    },
+    "USE_RX_BIND": {
+      "title": "Receiver bind from FC",
+      "category": "Receiver protocol",
+      "level": "optional",
+      "summary": "Starts receiver binding from the Configurator (SPI receivers and some serial protocols).",
+      "enable": "You bind the receiver through the FC.",
+      "disable": "You bind at the receiver."
+    },
+    "USE_RX_LINK_QUALITY_INFO": {
+      "title": "Link quality info",
+      "category": "Receiver protocol",
+      "level": "optional",
+      "summary": "Reports receiver link quality (LQ) separately from RSSI.",
+      "enable": "CRSF/ELRS/Ghost users who display LQ.",
+      "disable": "Small saving."
+    },
+    "USE_RX_LINK_UPLINK_POWER": {
+      "title": "Uplink power",
+      "category": "Receiver protocol",
+      "level": "optional",
+      "summary": "Reports the transmitter's uplink power level (CRSF).",
+      "enable": "You display TX power.",
+      "disable": "Small saving."
+    },
+    "USE_CRSF_V3": {
+      "title": "CRSF v3",
+      "category": "Receiver protocol",
+      "level": "optional",
+      "summary": "CRSF protocol v3 features, such as faster baud negotiation.",
+      "enable": "Newer CRSF/ELRS gear.",
+      "disable": "Small saving; v2 still works."
+    },
+    "USE_CRSF_CMS_TELEMETRY": {
+      "title": "CMS over CRSF",
+      "category": "On-screen menus",
+      "level": "optional",
+      "summary": "Shows the on-screen menus on CRSF radios.",
+      "enable": "You use CMS menus from a CRSF radio.",
+      "disable": "You do not use CMS."
+    },
+    "USE_EXTENDED_CMS_MENUS": {
+      "title": "Extended CMS menus",
+      "category": "On-screen menus",
+      "level": "optional",
+      "summary": "Extra CMS menu pages.",
+      "enable": "You use CMS a lot.",
+      "disable": "You do not use CMS."
+    },
+    "USE_EMFAT_AUTORUN": {
+      "title": "USB drive autorun file",
+      "category": "Logging",
+      "level": "optional",
+      "summary": "Adds an autorun file to the USB log drive.",
+      "enable": "Cosmetic.",
+      "disable": "Small saving."
+    },
+    "USE_EMFAT_ICON": {
+      "title": "USB drive icon",
+      "category": "Logging",
+      "level": "optional",
+      "summary": "Adds a drive icon to the USB log drive.",
+      "enable": "Cosmetic.",
+      "disable": "Small saving."
+    },
+    "USE_EMFAT_README": {
+      "title": "USB drive readme",
+      "category": "Logging",
+      "level": "optional",
+      "summary": "Adds a readme file to the USB log drive.",
+      "enable": "Cosmetic.",
+      "disable": "Small saving."
+    },
+    "USE_PERSISTENT_MSC_RTC": {
+      "title": "Keep clock across USB-drive reboot",
+      "category": "Logging",
+      "level": "optional",
+      "summary": "Preserves the real-time clock when rebooting into USB mass-storage mode, so log files get correct dates.",
+      "enable": "Comes with USB mass storage.",
+      "disable": "Follows USB mass storage."
+    },
+    "USE_PIN_PULL_UP_DOWN": {
+      "title": "Pin pull-up/down",
+      "category": "Hardware",
+      "level": "optional",
+      "summary": "Configurable pull-up or pull-down resistors on input pins (CLI 'pullup').",
+      "enable": "Your wiring needs a pull resistor on an input.",
+      "disable": "Small saving."
+    },
+    "USE_FLASH_BOOT_LOADER": {
+      "title": "Flash bootloader",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Support for boards that boot through a separate flash bootloader.",
+      "enable": "Set for those boards only.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_FLASH_READS_USING_4LINES": {
+      "title": "Quad-line flash reads",
+      "category": "Storage driver",
+      "level": "hardware",
+      "summary": "Reads the W25Q128 flash over 4 data lines (QSPI boards).",
+      "enable": "QSPI flash wiring.",
+      "disable": "Normal SPI flash."
+    },
+    "USE_FLASH_WRITES_USING_4LINES": {
+      "title": "Quad-line flash writes",
+      "category": "Storage driver",
+      "level": "hardware",
+      "summary": "Writes the W25Q128 flash over 4 data lines (QSPI boards).",
+      "enable": "QSPI flash wiring.",
+      "disable": "Normal SPI flash."
+    },
+    "USE_QUADSPI_DEVICE_1": {
+      "title": "Quad-SPI bus 1",
+      "category": "MCU peripheral",
+      "level": "hardware",
+      "summary": "First Quad-SPI peripheral (H7).",
+      "enable": "H7 boards with QSPI flash.",
+      "disable": "Not present on F4."
+    },
+    "USE_EXTENDED_SPI_DEVICE": {
+      "title": "Extra SPI DMA mappings",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "DMA request mappings for SPI buses 4-6 on MCUs that have them.",
+      "enable": "Set per MCU.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_ADC_INTERRUPT": {
+      "title": "ADC interrupt",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "Interrupt-driven ADC (G4/H7 driver option).",
+      "enable": "Set per MCU.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_CRS_INTERRUPTS": {
+      "title": "Clock recovery interrupts",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "H7 clock-recovery-system interrupts for USB timing.",
+      "enable": "Set per MCU.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_MCO_OUTPUTS": {
+      "title": "Clock outputs",
+      "category": "MCU platform",
+      "level": "platform",
+      "summary": "MCU clock output pins (H7 system code).",
+      "enable": "Set per board or MCU.",
+      "disable": "Never toggle by hand."
+    },
+    "USE_I2C_PULLUP": {
+      "title": "I2C internal pull-ups",
+      "category": "Hardware",
+      "level": "hardware",
+      "summary": "Uses the MCU's internal pull-ups on I2C pins.",
+      "enable": "Boards without external I2C pull-up resistors.",
+      "disable": "Decided by the board design."
+    },
+    "USE_MPU9250_MAG": {
+      "title": "MPU9250 built-in compass",
+      "category": "Sensor driver",
+      "level": "hardware",
+      "summary": "Uses the compass inside an MPU9250 IMU.",
+      "enable": "Board with an MPU9250 and you want its compass.",
+      "disable": "No MPU9250."
+    },
+    "USE_WS2811_SINGLE_COLOUR": {
+      "title": "Single-colour LED strip",
+      "category": "Lighting",
+      "level": "niche",
+      "summary": "Smaller LED strip driver that sends one colour to every LED.",
+      "enable": "You want simple one-colour LEDs and a smaller driver.",
+      "disable": "You want per-LED colours."
+    },
+    "USE_MSP_UART": {
+      "title": "MSP on UART",
+      "category": "Configuration",
+      "level": "niche",
+      "summary": "Default MSP on a hardware UART (for boards without USB).",
+      "enable": "USB-less boards.",
+      "disable": "Boards with USB."
+    },
+    "USE_MSP_PUSH_OVER_VCP": {
+      "title": "MSP push over USB",
+      "category": "Configuration",
+      "level": "dev",
+      "summary": "Pushes MSP messages over USB unprompted.",
+      "enable": "Developer tools.",
+      "disable": "Leave off."
+    },
+    "USE_MSP_SET_MOTOR": {
+      "title": "MSP motor test",
+      "category": "Configuration",
+      "level": "dev",
+      "summary": "Allows setting motor outputs over MSP.",
+      "enable": "Bench testing only.",
+      "disable": "Leave off for safety."
+    },
+    "USE_STANDARD_MATH": {
+      "title": "Standard math library",
+      "category": "Build",
+      "level": "dev",
+      "summary": "Uses libm functions instead of the firmware's fast approximations.",
+      "enable": "Testing accuracy.",
+      "disable": "Slower and larger."
+    },
+    "USE_4WAY_FORWARD_PROGRAMMING": {
+      "title": "4-way forward programming",
+      "category": "ESC tools",
+      "level": "optional",
+      "summary": "Forwards ESC programming traffic through the ESC sensor port.",
+      "enable": "Experimental ESC programming path.",
+      "disable": "Off on every target."
+    },
+    "USE_AUTO_ACKKNOWLEDGEMENT": {
+      "title": "NRF24 auto-acknowledge",
+      "category": "SPI receiver",
+      "level": "niche",
+      "summary": "Option for the NRF24 INAV protocol.",
+      "enable": "NRF24 receivers only.",
+      "disable": "Leave off."
+    },
+    "USE_BIND_ADDRESS_FOR_DATA_STATE": {
+      "title": "NRF24 bind address",
+      "category": "SPI receiver",
+      "level": "niche",
+      "summary": "Option for the NRF24 INAV protocol.",
+      "enable": "NRF24 receivers only.",
+      "disable": "Leave off."
+    },
+    "USE_VTX": {
+      "title": "Redpine VTX option",
+      "category": "SPI receiver",
+      "level": "niche",
+      "summary": "Used only by the Redpine SPI receiver protocol.",
+      "enable": "Redpine receivers only.",
+      "disable": "Leave off."
+    },
+    "USE_RANGEFINDER_HCSR04": {
+      "title": "HC-SR04 sonar",
+      "category": "Sensor driver",
+      "level": "niche",
+      "summary": "Driver for the HC-SR04 ultrasonic rangefinder. Needs USE_RANGEFINDER.",
+      "enable": "You fit an HC-SR04.",
+      "disable": "No rangefinder."
+    },
+    "USE_RANGEFINDER_TF": {
+      "title": "Benewake TF lidar",
+      "category": "Sensor driver",
+      "level": "niche",
+      "summary": "Driver for Benewake TFmini/TF02 lidar. Needs USE_RANGEFINDER.",
+      "enable": "You fit a TF lidar.",
+      "disable": "No rangefinder."
+    }
+  },
+  "features": [
+    {
+      "group": "Receiver",
+      "hint": "The protocol your receiver talks to the flight controller.",
+      "items": [
+        {
+          "id": "crsf",
+          "label": "CRSF / ExpressLRS",
+          "options": [
+            "USE_SERIALRX_CRSF",
+            "USE_TELEMETRY_CRSF",
+            "USE_CRSF_LINK_STATISTICS",
+            "USE_CRSF_CMS_TELEMETRY",
+            "USE_CRSF_V3",
+            "USE_RX_RSSI_DBM",
+            "USE_RX_LINK_QUALITY_INFO",
+            "USE_RX_LINK_UPLINK_POWER"
+          ]
+        },
+        {
+          "id": "sbus",
+          "label": "SBUS (Futaba, FrSky)",
+          "options": [
+            "USE_SERIALRX_SBUS"
+          ]
+        },
+        {
+          "id": "fport",
+          "label": "FrSky FPort / FBUS",
+          "options": [
+            "USE_SERIALRX_FPORT",
+            "USE_SERIALRX_FBUS"
+          ]
+        },
+        {
+          "id": "ghst",
+          "label": "ImmersionRC Ghost",
+          "options": [
+            "USE_SERIALRX_GHST",
+            "USE_TELEMETRY_GHST"
+          ]
+        },
+        {
+          "id": "ibus",
+          "label": "FlySky iBUS / iBUS2",
+          "options": [
+            "USE_SERIALRX_IBUS",
+            "USE_SERIALRX_IBUS2",
+            "USE_TELEMETRY_IBUS",
+            "USE_TELEMETRY_IBUS2",
+            "USE_TELEMETRY_IBUS_EXTENDED"
+          ]
+        },
+        {
+          "id": "spektrum",
+          "label": "Spektrum DSM / SRXL / SRXL2",
+          "options": [
+            "USE_SERIALRX_SPEKTRUM",
+            "USE_SERIALRX_SRXL2",
+            "USE_TELEMETRY_SRXL",
+            "USE_SPEKTRUM_BIND",
+            "USE_SPEKTRUM_BIND_PLUG",
+            "USE_SPEKTRUM_REAL_RSSI",
+            "USE_SPEKTRUM_FAKE_RSSI",
+            "USE_SPEKTRUM_RSSI_PERCENT_CONVERSION",
+            "USE_SPEKTRUM_VTX_CONTROL",
+            "USE_SPEKTRUM_VTX_TELEMETRY",
+            "USE_SPEKTRUM_CMS_TELEMETRY"
+          ]
+        },
+        {
+          "id": "hott",
+          "label": "Graupner SUMD / HoTT",
+          "options": [
+            "USE_SERIALRX_SUMD",
+            "USE_SERIALRX_SUMH",
+            "USE_TELEMETRY_HOTT",
+            "USE_HOTT_TEXTMODE"
+          ]
+        },
+        {
+          "id": "jeti",
+          "label": "Jeti EX Bus",
+          "options": [
+            "USE_SERIALRX_JETIEXBUS",
+            "USE_TELEMETRY_JETIEXBUS"
+          ]
+        },
+        {
+          "id": "xbus",
+          "label": "JR XBUS",
+          "options": [
+            "USE_SERIALRX_XBUS"
+          ]
+        },
+        {
+          "id": "ppm",
+          "label": "PPM / PWM receiver",
+          "options": [
+            "USE_PPM",
+            "USE_PWM"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Telemetry",
+      "hint": "Extra telemetry links beyond your receiver's own.",
+      "items": [
+        {
+          "id": "sport",
+          "label": "FrSky S.Port / Hub telemetry",
+          "options": [
+            "USE_TELEMETRY_SMARTPORT",
+            "USE_TELEMETRY_FRSKY_HUB"
+          ]
+        },
+        {
+          "id": "sbus2",
+          "label": "Futaba SBUS2 telemetry",
+          "options": [
+            "USE_TELEMETRY_SBUS2"
+          ]
+        },
+        {
+          "id": "mavlink",
+          "label": "MAVLink / LTM",
+          "options": [
+            "USE_TELEMETRY_MAVLINK",
+            "USE_TELEMETRY_LTM"
+          ]
+        },
+        {
+          "id": "lua",
+          "label": "Transmitter Lua scripts",
+          "options": [
+            "USE_MSP_OVER_TELEMETRY"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "ESC & RPM",
+      "hint": "How the FC drives the ESC and gets RPM back.",
+      "items": [
+        {
+          "id": "dshot",
+          "label": "DShot (incl. bidirectional)",
+          "options": [
+            "USE_DSHOT",
+            "USE_DSHOT_TELEMETRY",
+            "USE_DSHOT_TELEMETRY_STATS",
+            "USE_DSHOT_BITBANG",
+            "USE_DSHOT_DMAR"
+          ]
+        },
+        {
+          "id": "escsensor",
+          "label": "ESC serial telemetry",
+          "options": [
+            "USE_ESC_SENSOR",
+            "USE_ESC_SENSOR_TELEMETRY"
+          ]
+        },
+        {
+          "id": "castle",
+          "label": "Castle Link",
+          "options": [
+            "USE_TELEMETRY_CASTLE"
+          ]
+        },
+        {
+          "id": "freq",
+          "label": "Frequency (RPM) sensor",
+          "options": [
+            "USE_FREQ_SENSOR"
+          ]
+        },
+        {
+          "id": "escprog",
+          "label": "Program ESCs through the FC",
+          "options": [
+            "USE_SERIAL_4WAY_BLHELI_INTERFACE",
+            "USE_SERIAL_4WAY_BLHELI_BOOTLOADER",
+            "USE_SERIAL_4WAY_SK_BOOTLOADER",
+            "USE_BLHELI_FORWARD_PROGRAMMING",
+            "USE_AM32_FORWARD_PROGRAMMING",
+            "USE_ESCSERIAL",
+            "USE_ESCSERIAL_SIMONK"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Servo bus",
+      "hint": "Bus-connected servos or sensors driven by the FC.",
+      "items": [
+        {
+          "id": "sbusout",
+          "label": "SBUS servo output",
+          "options": [
+            "USE_SBUS_OUTPUT"
+          ]
+        },
+        {
+          "id": "fbusmaster",
+          "label": "FrSky FBUS master",
+          "options": [
+            "USE_FBUS_MASTER"
+          ]
+        },
+        {
+          "id": "sportmaster",
+          "label": "S.Port sensors on the FC",
+          "options": [
+            "USE_SPORT_MASTER"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Sensors & logging",
+      "hint": "Optional add-on hardware and logging.",
+      "items": [
+        {
+          "id": "gps",
+          "label": "GPS",
+          "options": [
+            "USE_GPS",
+            "USE_GPS_NMEA",
+            "USE_GPS_UBLOX",
+            "USE_GPS_RESCUE",
+            "USE_GPS_PLUS_CODES",
+            "USE_CMS_GPS_RESCUE_MENU"
+          ]
+        },
+        {
+          "id": "blackbox",
+          "label": "Blackbox logging",
+          "options": [
+            "USE_BLACKBOX"
+          ]
+        },
+        {
+          "id": "usbmsc",
+          "label": "Download logs as a USB drive",
+          "options": [
+            "USE_USB_MSC",
+            "USE_EMFAT_AUTORUN",
+            "USE_EMFAT_ICON"
+          ]
+        },
+        {
+          "id": "fuel",
+          "label": "Smart fuel gauge",
+          "options": [
+            "USE_SMARTFUEL"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Displays & FPV",
+      "hint": "Lights, on-screen display and video gear.",
+      "items": [
+        {
+          "id": "led",
+          "label": "LED strip",
+          "options": [
+            "USE_LED_STRIP",
+            "USE_LED_STRIP_STATUS_MODE"
+          ]
+        },
+        {
+          "id": "cms",
+          "label": "On-screen menus (CMS)",
+          "options": [
+            "USE_CMS",
+            "USE_EXTENDED_CMS_MENUS",
+            "USE_CMS_FAILSAFE_MENU",
+            "USE_CRSF_CMS_TELEMETRY",
+            "USE_SPEKTRUM_CMS_TELEMETRY"
+          ]
+        },
+        {
+          "id": "osd",
+          "label": "FPV OSD",
+          "options": [
+            "USE_OSD",
+            "USE_OSD_ADJUSTMENTS",
+            "USE_OSD_PROFILES",
+            "USE_OSD_STICK_OVERLAY",
+            "USE_OSD_OVER_MSP_DISPLAYPORT",
+            "USE_MSP_DISPLAYPORT",
+            "USE_CANVAS",
+            "USE_FRSKYOSD",
+            "USE_MAX7456"
+          ]
+        },
+        {
+          "id": "vtx",
+          "label": "FPV video transmitter / camera control",
+          "options": [
+            "USE_VTX_COMMON",
+            "USE_VTX_CONTROL",
+            "USE_VTX_SMARTAUDIO",
+            "USE_VTX_TRAMP",
+            "USE_VTX_TABLE",
+            "USE_CAMERA_CONTROL",
+            "USE_RCDEVICE"
+          ]
+        },
+        {
+          "id": "oled",
+          "label": "I2C OLED dashboard",
+          "options": [
+            "USE_DASHBOARD",
+            "USE_I2C_OLED_DISPLAY"
+          ]
+        }
+      ]
+    }
+  ]
+}

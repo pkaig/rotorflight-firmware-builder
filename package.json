@@ -1,0 +1,32 @@
+{
+  "name": "rotorflight-firmware-builder",
+  "version": "0.1.0",
+  "description": "Headless local firmware build module for Rotorflight (Phase 1: CLI only)",
+  "type": "module",
+  "bin": {
+    "rf-buildtool": "./dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "app",
+    "data",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "cli": "node src/cli.ts",
+    "test": "node --test",
+    "app": "tsc -p tsconfig.build.json && node dist/app/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0"
+  }
+}
