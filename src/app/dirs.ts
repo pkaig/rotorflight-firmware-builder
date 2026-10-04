@@ -41,6 +41,12 @@ export function normalisePath(input: string): string {
   if (win && process.platform !== "win32") {
     return `/mnt/${win[1]!.toLowerCase()}/${win[2]!.replace(/\\/g, "/")}`.replace(/\/+$/, "") || "/";
   }
+  // And the reverse for the native Windows app: a path remembered from the WSL
+  // version (/mnt/c/Projects/x) becomes C:\Projects\x.
+  const mnt = p.match(/^\/mnt\/([a-z])(?:\/(.*))?$/i);
+  if (mnt && process.platform === "win32") {
+    return `${mnt[1]!.toUpperCase()}:\\${(mnt[2] ?? "").replace(/\//g, "\\")}`;
+  }
   return p;
 }
 

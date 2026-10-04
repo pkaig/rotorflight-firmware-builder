@@ -13,7 +13,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { detectBuildEnv, installBuildTools, type BuildEnv } from "../buildenv.ts";
 import { readFile } from "node:fs/promises";
-import { dirname, join, resolve as resolvePath } from "node:path";
+import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
@@ -187,6 +187,8 @@ interface HistoryEntry {
   makeVars?: Record<string, string>;
   /** Where the source came from, for the flash confirmation. */
   source?: string;
+  /** User-given name, e.g. "OMP M4" or "x feature test". */
+  name?: string;
 }
 
 let session: Session | undefined;
@@ -377,7 +379,7 @@ async function load(req: LoadRequest) {
   emit("session", publicSession());
 }
 
-async function build(sel: Selection) {
+async function build(sel: Selection, name?: string) {
   const s = session!;
   const options = selectionOptions(sel, guardMap(s.probe));
   if (s.origin) {
@@ -430,6 +432,7 @@ async function build(sel: Selection) {
       options,
       ok: true,
       makeVars: s.makeVars,
+      ...(name ? { name } : {}),
       source: s.local ? s.origin ?? s.sourceDir : s.ref,
       ...r.size,
       hexPath: r.hexPath,
@@ -456,6 +459,7 @@ async function build(sel: Selection) {
       commit: s.commit,
       options,
       ok: false,
+      ...(name ? { name } : {}),
       error: isBuildToolError(err) ? err.message : String(err),
       durationMs: Date.now() - Date.parse(at),
     });
@@ -614,6 +618,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         board: key || null,
         configInserted,
         options: entry.options,
+        name: entry.name ?? null,
         makeVars: entry.makeVars ?? {},
         source: entry.source ?? "",
         bytesTotal: image.bytesTotal,
@@ -625,10 +630,12 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       // Download a built .hex by its history index, to load into the Configurator.
       const entry = history[Number(url.searchParams.get("i"))];
       if (!entry?.ok || !entry.hexPath || !existsSync(entry.hexPath)) return send(res, 404, { error: "no such build" });
-      const suffix = entry.options.length
-        ? `_custom-${entry.at.slice(0, 19).replace(/[-:T]/g, "")}`
-        : "_baseline";
-      const name = entry.hexPath.split("/").pop()!.replace(/\.hex$/, `${suffix}.hex`);
+      const suffix = entry.name
+        ? `_${fileSafe(entry.name)}`
+        : entry.options.length
+          ? `_custom-${entry.at.slice(0, 19).replace(/[-:T]/g, "")}`
+          : "_baseline";
+      const name = basename(entry.hexPath).replace(/\.hex$/, `${suffix}.hex`);
       res.writeHead(200, {
         "content-type": "application/octet-stream",
         "content-disposition": `attachment; filename="${name}"`,
@@ -675,6 +682,18 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       return send(res, 200, { ...preview, ...(estimate ? { estimate } : {}) });
     }
 
+    case "POST /api/rename-build": {
+      const body = (await readJson(req)) as { at?: string; name?: unknown };
+      const entry = history.find((h) => h.at === body.at);
+      if (!entry) return send(res, 404, { error: "no such build" });
+      const name = cleanName(body.name);
+      if (name) entry.name = name;
+      else delete entry.name;
+      saveHistory();
+      emit("history", history);
+      return send(res, 200, { ok: true, name: name ?? null });
+    }
+
     case "POST /api/delete-build": {
       // Identified by timestamp, not index: indices shift as builds come and go.
       const { at } = (await readJson(req)) as { at?: string };
@@ -713,10 +732,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     }
 
     case "POST /api/build": {
-      const sel = validSelection(await readJson(req));
+      const body = await readJson(req);
+      const sel = validSelection(body);
       if (!sel) return send(res, 400, { error: "invalid selection for the loaded target" });
+      const name = cleanName((body as { name?: unknown }).name);
       const n = sel.add.length + sel.remove.length;
-      const started = startJob("build", `Building ${session!.target}${n ? ` with ${n} change${n > 1 ? "s" : ""}` : " baseline"}`, () => build(sel));
+      const what = name ? `"${name}"` : `${session!.target}${n ? ` with ${n} change${n > 1 ? "s" : ""}` : " baseline"}`;
+      const started = startJob("build", `Building ${what}`, () => build(sel, name));
       return send(res, started ? 202 : 409, started ? { ok: true } : { error: `busy: ${busy}` });
     }
   }
@@ -757,6 +779,18 @@ export async function startServer(opts: { port?: number; host?: string } = {}): 
       resolvePromise({ port, url: `http://localhost:${port}`, close: () => server.close() });
     });
   });
+}
+
+/** A build name: trimmed, single-line, at most 60 characters; empty means none. */
+function cleanName(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const v = raw.replace(/[\r\n\t]+/g, " ").trim().slice(0, 60);
+  return v || undefined;
+}
+
+/** For file names: "OMP M4 / test" -> "OMP-M4-test". */
+function fileSafe(name: string): string {
+  return name.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "build";
 }
 
 /** What the page is told about the build environment (no PATH). */

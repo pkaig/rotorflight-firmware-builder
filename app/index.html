@@ -173,11 +173,29 @@
              background: var(--color-warning-soft); color: var(--color-warning); box-shadow: inset 3px 0 0 var(--color-warning); }
   .envnote ul { margin: 6px 0 0; padding-left: 18px; }
   .envnote code { background: rgb(0 0 0 / .2); padding: 1px 6px; border-radius: var(--radius-xs); user-select: all; }
+  .nolink { color: var(--color-text-disabled); cursor: not-allowed; text-decoration: underline dotted; }
+  .buildname { width: 100%; margin-top: 10px; }
+  .bname { font: 600 12px var(--font-ui); color: var(--color-text); cursor: text; border-bottom: 1px dashed transparent; }
+  .bname:hover, .bname:focus-visible { border-bottom-color: var(--color-text-muted); outline: none; }
+  .bname.unnamed { font-weight: 400; font-style: italic; color: var(--color-text-disabled); }
+  .renamebox { width: 100%; height: 24px; font-size: 12px; }
+  .devlist { border: 1px solid var(--color-border-soft); border-radius: var(--radius-md); background: var(--color-surface);
+             max-height: 280px; min-height: 120px; overflow: auto; padding: 4px; }
+  .devitem { display: flex; width: 100%; height: auto; align-items: center; gap: 10px; text-align: left; font-weight: 400;
+             padding: 9px 12px; border-radius: var(--radius-sm); background: transparent; color: var(--color-text); }
+  .devitem:hover:not(:disabled) { background: var(--color-hover); }
+  .devitem[aria-selected="true"] { background: var(--color-accent-soft); box-shadow: inset 3px 0 0 var(--color-accent); }
+  .devitem .dname { font-size: 13px; }
+  .devitem .ddetail { font: 11px var(--font-mono); color: var(--color-text-muted); margin-left: auto; white-space: nowrap; }
+  .devitem .rftag { font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-pill);
+                    color: var(--color-accent-text); background: var(--color-accent-soft); }
+  .devempty { padding: 28px 12px; text-align: center; color: var(--color-text-muted); font-size: 12.5px; }
   .boardrow { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end;
               padding: 10px 0; border-top: 1px solid var(--chrome-border); border-bottom: 1px solid var(--chrome-border); }
   #boardstatus { align-self: center; font-size: 12px; color: var(--chrome-fg-muted); }
   #boardstatus b { color: var(--chrome-fg); }
   #boardstatus .warn { color: var(--color-danger); }
+  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); margin-right: 6px; vertical-align: 1px; }
   .source { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 10px; }
   .source > .f { flex-basis: 100%; }
   .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--radius-pill); background: var(--chrome-bg-sunken);
@@ -478,6 +496,8 @@
     <section class="panel">
       <h2>Selection</h2>
       <div id="preview" class="muted">No changes — builds the baseline.</div>
+      <input type="text" id="buildName" class="buildname" maxlength="60" autocomplete="off"
+             placeholder="Name this build (optional), e.g. OMP M4" aria-label="Build name">
       <div style="display:flex;gap:8px;margin-top:10px">
         <button id="build" disabled>Build</button>
         <button class="primary" id="buildFlash" disabled title="Build, then flash it to the connected board over USB">Build &amp; flash</button>
@@ -498,6 +518,16 @@
     </section>
   </aside>
 </main>
+
+<dialog id="devDialog" aria-labelledby="devTitle">
+  <h2 id="devTitle">Select a device</h2>
+  <div id="devList" class="devlist" role="listbox" aria-labelledby="devTitle"></div>
+  <p id="devHint" class="muted"></p>
+  <div class="dlgbtns">
+    <button id="devCancel">Cancel</button>
+    <button class="primary" id="devConnect" disabled>Connect</button>
+  </div>
+</dialog>
 
 <dialog id="envDialog">
   <h2>Load build environment</h2>
@@ -557,7 +587,8 @@ const STATE_LABEL = {
   "off-locked": ["unavailable", ""],
 };
 let session = null, busy = null, history = [];
-let filter = "changeable", query = "";
+// Default view: Changes. The last filter used is remembered per viewer.
+let filter = (() => { try { return ["changes", "on", "all"].includes(localStorage.getItem("rfb.filter")) ? localStorage.getItem("rfb.filter") : "changes"; } catch { return "changes"; } })(), query = "";
 const add = new Set(), remove = new Set();
 
 async function api(path, body) {
@@ -586,9 +617,17 @@ function selectionDiffers() {
     c.erase !== (session.makeVars?.FLASH_CONFIG_ERASE === "yes");
 }
 
+// Flashing needs a way to reach the board: a serial port from Detect board (to
+// reboot it into DFU), or a board already in DFU that this app may use.
+let dfuPresent = false;
+let lastPort = null; // the serial port granted by Detect, reused to reboot into DFU
+function canFlash() { return !!lastPort || dfuPresent; }
+const FLASH_HINT = "Detect the board first (or put it in DFU mode by holding BOOT while plugging in).";
+
 function updateButtons() {
   $("build").disabled = !session || !!busy || previewBad || selectionDiffers();
-  $("buildFlash").disabled = $("build").disabled;
+  $("buildFlash").disabled = $("build").disabled || !canFlash();
+  $("buildFlash").title = canFlash() ? "Build, then flash it to the connected board over USB" : FLASH_HINT;
   $("reset").disabled = !add.size && !remove.size;
 }
 
@@ -605,16 +644,23 @@ function renderSummary() {
     `<b>${c["on-removable"] || 0}</b> removable, <b>${c["off-addable"] || 0}</b> addable, ` +
     `${(c["on-locked"] || 0) + (c["off-locked"] || 0)} locked.` +
     (session.staleFiles?.length ? `<div class="warnbox">${session.staleFiles.length} file(s) in your folder changed since it was probed. Builds already use the new code; <b>Load firmware</b> again to re-probe the toggles (needed after adding <code>DISABLE_USE_X</code> guards).</div>` : "");
-  const chips = [["changeable", "Changeable"], ["unneeded", "Not needed"], ["on", "Baseline"], ["all", "All"]];
+  const chips = [["changes", "Changes"], ["on", "Baseline"], ["all", "All"]];
   $("chips").innerHTML = chips.map(([k, l]) =>
     `<button class="chip" data-f="${k}" aria-pressed="${filter === k}">${l}</button>`).join(" ");
   $("tools").hidden = false;
 }
 
+/** In the last preview, did the selection add or remove this option (a knock-on, e.g. a follower)? */
+function changedByPreview(name) {
+  if (!lastPreview || !(add.size || remove.size)) return false;
+  return lastPreview.added.includes(name) || lastPreview.removed.includes(name);
+}
+
 function visible(o) {
   if (query && !(o.name.toLowerCase().includes(query) || o.info?.title.toLowerCase().includes(query))) return false;
-  if (filter === "changeable") return o.state === "on-removable" || o.state === "off-addable";
-  if (filter === "unneeded") return need(o.name) === "unneeded" && o.state.startsWith("on-");
+  // Changes: only what differs from the baseline: options switched on or off (directly or
+  // through Your setup), plus their follow-on effects from the preview.
+  if (filter === "changes") return add.has(o.name) || remove.has(o.name) || changedByPreview(o.name);
   if (filter === "on") return o.state.startsWith("on-");
   return true;
 }
@@ -640,9 +686,9 @@ function renderList() {
     groups.get(g).push(o);
   }
   if (!groups.size) {
-    $("list").innerHTML = `<div class="empty">${filter === "changeable"
-      ? "Nothing on this target can be toggled.<br>Baseline features need an <code>#ifndef DISABLE_USE_X</code> guard in the firmware headers to become removable."
-      : filter === "unneeded" ? "Your setup needs everything that is on." : "No options match."}</div>`;
+    $("list").innerHTML = `<div class="empty">${filter === "changes" && !query
+      ? "No changes from the baseline yet.<br>Untick features in <b>Your setup</b>, or switch options on or off under <b>All</b>."
+      : "No options match."}</div>`;
     return;
   }
   const html = [];
@@ -938,6 +984,7 @@ function renderCard() {
 $("chips").addEventListener("click", (e) => {
   if (!e.target.dataset.f) return;
   filter = e.target.dataset.f;
+  store("rfb.filter", filter);
   renderSummary(); renderList();
 });
 $("search").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); renderList(); });
@@ -1100,9 +1147,11 @@ function renderHistory() {
     const baseFlash = base ? base.flash : sb && sb.source !== "nearest" && session.target === h.target && session.commit === h.commit ? sb.flash : null;
     const delta = h.ok && baseFlash !== null && h !== base ? h.flash - baseFlash : null;
     return `<tr><td>${new Date(h.at).toLocaleTimeString()}<br><span class="muted">${h.target}</span>` +
-      (h.ok && h.hexPath ? `<br><a href="/api/hex?i=${i}" download>.hex</a> · <a href="#" data-flash="${i}">flash</a>` : "") +
+      (h.ok && h.hexPath ? `<br><a href="/api/hex?i=${i}" download>.hex</a> · ` +
+        (canFlash() ? `<a href="#" data-flash="${i}">flash</a>` : `<span class="nolink" title="${FLASH_HINT}">flash</span>`) : "") +
       `<br><a href="#" class="dellink" data-delete="${esc(h.at)}" title="Remove this build and its files">delete</a></td>` +
-      `<td class="name">${h.options.length ? h.options.map(esc).join("<br>") : "<span class='muted'>baseline</span>"}</td>` +
+      `<td class="name"><span class="bname ${h.name ? "" : "unnamed"}" data-rename="${esc(h.at)}" role="button" tabindex="0" title="Click to rename">${h.name ? esc(h.name) : "add name"}</span><br>` +
+      `${h.options.length ? h.options.map(esc).join("<br>") : "<span class='muted'>baseline</span>"}</td>` +
       `<td class="num">${h.ok ? `${h.flash.toLocaleString()} B` : `<span class="pos">failed</span>`}` +
       (delta !== null ? `<br><span class="${delta < 0 ? "neg" : "pos"}">${delta > 0 ? "+" : ""}${delta.toLocaleString()} B</span>` : "") +
       `</td></tr>`;
@@ -1139,7 +1188,7 @@ $("load").addEventListener("click", async () => {
   } catch (err) { appendLog(err.message, "error"); }
 });
 $("build").addEventListener("click", async () => {
-  try { await api("/api/build", { add: [...add], remove: [...remove] }); }
+  try { await api("/api/build", { add: [...add], remove: [...remove], name: $("buildName").value }); $("buildName").value = ""; }
   catch (err) { appendLog(err.message, "error"); }
 });
 
@@ -1154,6 +1203,16 @@ function applySession(next) {
   const prev = session;
   session = next;
   if (!session) return;
+  // Adopt the folder path the server actually used (e.g. C:\... for a /mnt/c/...
+  // path remembered from the WSL version), so the page and the server agree.
+  if (session.local) {
+    const used = session.origin || session.sourceDir;
+    store("rfb.srcdir", used);
+    if (srcMode() === "local" && $("srcdir").value !== used) {
+      $("srcdir").value = used;
+      $("srcdirShow").textContent = used;
+    }
+  }
   // Updates to the same load (baseline measured, folder changes synced) keep the toggles.
   const same = prev && prev.sourceDir === session.sourceDir && prev.target === session.target &&
     prev.commit === session.commit && prev.probe.durationMs === session.probe.durationMs;
@@ -1244,12 +1303,11 @@ async function pickBoard(key, { quiet = false } = {}) {
     $("boardstatus").innerHTML = `<span class="warn">${esc(key)}: ${esc(err.message)}</span>`;
   }
 }
-$("board").addEventListener("change", () => pickBoard($("board").value));
+$("board").addEventListener("change", () => { boardFromDetect = false; pickBoard($("board").value); });
 
 // --- detect: MSP_BOARD_INFO over Web Serial, as the Configurator's Detect does --------
 // Serial (MSP) and DFU code lives in /flasher.js so it can be tested outside the page.
 const flasher = import(`/flasher.js?v=${Date.now()}`); // never a stale cached copy
-let lastPort = null; // the serial port granted by Detect, reused to reboot into DFU
 
 $("detect").addEventListener("click", async () => {
   if (!("serial" in navigator)) {
@@ -1258,8 +1316,22 @@ $("detect").addEventListener("click", async () => {
   }
   let port;
   try { port = await navigator.serial.requestPort(); } catch { return; } // picker cancelled
+  await detectOn(port);
+});
+
+/** Was the board selection set by Detect (so it should follow the connection)? */
+let boardFromDetect = false;
+let detecting = false;
+
+/**
+ * Read the board over a serial port (MSP_BOARD_INFO) and select it. Used by the
+ * Detect button, and automatically when an already-permitted board is plugged in.
+ */
+async function detectOn(port, { auto = false } = {}) {
+  if (detecting) return;
+  detecting = true;
   $("detect").disabled = true;
-  $("boardstatus").textContent = "Detecting…";
+  $("boardstatus").textContent = auto ? "Board connected, detecting…" : "Detecting…";
   try {
     const F = await flasher;
     const { info, version } = await F.withMsp(port, async (request) => {
@@ -1269,6 +1341,8 @@ $("detect").addEventListener("click", async () => {
       return { info, version };
     });
     lastPort = port;
+    boardFromDetect = true;
+    updateButtons(); renderHistory();
 
     // Same normalisation the Configurator applies to dotted board names.
     const board = info.boardName.replace(".", "_");
@@ -1283,7 +1357,7 @@ $("detect").addEventListener("click", async () => {
     const inRef = target ? selectTarget(target) : false;
 
     $("boardstatus").innerHTML =
-      `Detected <b>${esc(board || info.boardIdentifier)}</b>` +
+      `<span class="live" title="Connected"></span>Detected <b>${esc(board || info.boardIdentifier)}</b>` +
       (info.manufacturerId ? ` (${esc(info.manufacturerId)})` : "") +
       (target ? ` · <b>${esc(target)}</b>` : ` · <span class="warn">no target reported — pick one</span>`) +
       (version ? ` · running ${esc(version)}` : "") +
@@ -1291,13 +1365,53 @@ $("detect").addEventListener("click", async () => {
       (target && !inRef ? ` · <span class="warn">${esc(target)} is not a target in this ref</span>` : "") +
       (target && session && session.target !== target ? ` · <span class="warn">loaded target is ${esc(session.target)}: Load firmware again</span>` : "");
   } catch (err) {
-    const busyPort = /open|access|in use|lock/i.test(err.message);
-    $("boardstatus").innerHTML = `<span class="warn">Detect failed: ${esc(err.message)}` +
-      (busyPort ? " — close the Configurator or anything else using the port." : "") + `</span> Pick the board from the list instead.`;
+    if (auto) {
+      // A board that is still booting (or in DFU) may not answer yet: stay quiet.
+      $("boardstatus").innerHTML = `<span class="muted">Board connected. Click Detect board if it is not recognised.</span>`;
+    } else {
+      const busyPort = /open|access|in use|lock/i.test(err.message);
+      $("boardstatus").innerHTML = `<span class="warn">Detect failed: ${esc(err.message)}` +
+        (busyPort ? " — close the Configurator or anything else using the port." : "") + `</span> Pick the board from the list instead.`;
+    }
   } finally {
+    detecting = false;
     $("detect").disabled = false;
   }
-});
+}
+
+/** The detected board was unplugged: fall back to no board. */
+function boardGone() {
+  lastPort = null;
+  if (boardFromDetect) {
+    boardFromDetect = false;
+    renderBoards("");
+    store("rfb.board", null);
+  }
+  $("boardstatus").innerHTML = `<span class="muted">Board disconnected. Plug it in to detect it again.</span>`;
+  updateButtons(); renderHistory();
+}
+
+if ("serial" in navigator) {
+  navigator.serial.addEventListener("disconnect", (e) => {
+    // A flash reboots the board through DFU: that disconnect is expected.
+    if (flashing) return;
+    if (lastPort && e.target === lastPort) boardGone();
+  });
+  // A permitted board plugged (back) in: detect it without asking.
+  navigator.serial.addEventListener("connect", (e) => {
+    if (flashing) return;
+    setTimeout(() => detectOn(e.target, { auto: true }), 1500); // let it finish booting
+  });
+}
+
+/** At start-up: detect a board that is already plugged in and permitted. */
+async function autoDetectAtStart() {
+  try {
+    const ports = (await navigator.serial?.getPorts?.()) ?? [];
+    const fc = ports.find((p) => p.getInfo?.().usbVendorId === 0x0483);
+    if (fc) await detectOn(fc, { auto: true });
+  } catch {}
+}
 
 // --- firmware source: online release or a local directory ------------------------------
 let releases = [];
@@ -1401,7 +1515,7 @@ $("buildFlash").addEventListener("click", async () => {
     return;
   }
   flashAfter = history.length;
-  try { await api("/api/build", { add: [...add], remove: [...remove] }); }
+  try { await api("/api/build", { add: [...add], remove: [...remove], name: $("buildName").value }); $("buildName").value = ""; }
   catch (err) { flashAfter = null; appendLog(err.message, "error"); }
 });
 
@@ -1413,7 +1527,24 @@ function onHistoryForFlash() {
   else appendLog("Build failed, so nothing was flashed.", "error");
 }
 
+/** Is a board in DFU mode that we have permission for? Updates the flash controls. */
+async function refreshDfuPresence() {
+  try {
+    const F = await flasher;
+    const devs = (await navigator.usb?.getDevices?.()) ?? [];
+    dfuPresent = devs.some((d) => d.vendorId === F.DFU_FILTER.vendorId && d.productId === F.DFU_FILTER.productId);
+  } catch { dfuPresent = false; }
+  updateButtons(); renderHistory();
+}
+navigator.usb?.addEventListener?.("connect", refreshDfuPresence);
+navigator.usb?.addEventListener?.("disconnect", refreshDfuPresence);
+refreshDfuPresence();
+
 async function openFlash(i) {
+  if (!canFlash()) {
+    $("boardstatus").innerHTML = `<span class="warn">${FLASH_HINT}</span>`;
+    return;
+  }
   const key = currentBoardKey();
   flashImage = null;
   $("flashMeter").hidden = true;
@@ -1435,7 +1566,7 @@ async function openFlash(i) {
     flashImage = img;
     const erase = img.makeVars?.FLASH_CONFIG_ERASE === "yes";
     $("flashInfo").innerHTML =
-      `<dl><dt>Board</dt><dd><b>${esc(img.board)}</b> (${esc(img.target)})</dd>` +
+      `<dl>${img.name ? `<dt>Name</dt><dd><b>${esc(img.name)}</b></dd>` : ""}<dt>Board</dt><dd><b>${esc(img.board)}</b> (${esc(img.target)})</dd>` +
       `<dt>Firmware</dt><dd>${esc(img.source)}${img.options.length ? ` + <span class="mono">${esc(img.options.join(" "))}</span>` : " (baseline)"}</dd>` +
       `<dt>Size</dt><dd>${img.bytesTotal.toLocaleString()} bytes in ${img.blocks.length} blocks</dd>` +
       `<dt>Board config</dt><dd>${img.configInserted ? "inserted from rotorflight-targets" : "<b>not inserted</b>"}</dd>` +
@@ -1571,7 +1702,44 @@ $("flashUsb").addEventListener("click", async () => {
 
 $("flashClose").addEventListener("click", () => { if (!flashing) $("flashDialog").close(); });
 $("flashDialog").addEventListener("cancel", (e) => { if (flashing) e.preventDefault(); });
+function startRename(el) {
+  const at = el.dataset.rename;
+  const h = history.find((x) => x.at === at);
+  if (!h) return;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "renamebox";
+  input.maxLength = 60;
+  input.value = h.name ?? "";
+  input.placeholder = "Build name";
+  input.setAttribute("aria-label", "Build name");
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    if (save && input.value.trim() !== (h.name ?? "")) {
+      try { await api("/api/rename-build", { at, name: input.value }); return; } // the history event redraws
+      catch (err) { appendLog(err.message, "error"); }
+    }
+    renderHistory();
+  };
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") finish(true);
+    if (ev.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(true));
+}
+$("history").addEventListener("keydown", (e) => {
+  const el = e.target.closest?.("[data-rename]");
+  if (el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); startRename(el); }
+});
+
 $("history").addEventListener("click", async (e) => {
+  const ren = e.target.closest("[data-rename]");
+  if (ren) { startRename(ren); return; }
   const del = e.target.closest("[data-delete]");
   if (del) {
     e.preventDefault();
@@ -1694,6 +1862,57 @@ api("/api/env").then((env) => {
   if (!env.ok && env.canInstall && !later) promptEnv();
 }).catch(() => {});
 
+// --- in-app device chooser (desktop app) ------------------------------------------
+// Electron has no built-in Web Serial / WebUSB picker; it hands the list here.
+let devReq = null, devPick = null, devAnswered = false;
+function renderDevices() {
+  const list = devReq?.devices ?? [];
+  if (devPick && !list.some((d) => d.id === devPick)) devPick = null;
+  if (!devPick && list[0]?.rotorflight) devPick = list[0].id; // preselect the board
+  $("devList").innerHTML = list.length
+    ? list.map((d) => `<button class="devitem" role="option" data-dev="${esc(d.id)}" aria-selected="${d.id === devPick}">` +
+        `<span class="dname">${esc(d.name)}</span>${d.rotorflight ? `<span class="rftag">Rotorflight</span>` : ""}` +
+        `<span class="ddetail">${esc(d.detail)}</span></button>`).join("")
+    : `<div class="devempty">${devReq?.kind === "usb"
+        ? "No board in DFU mode yet. Hold BOOT while plugging it in. It appears here when it is ready."
+        : "No serial ports yet. Plug the flight controller in. It appears here when it is ready."}</div>`;
+  $("devConnect").disabled = !devPick;
+}
+function answerDevice(id) {
+  if (!devReq || devAnswered) return;
+  devAnswered = true;
+  window.rfbDesktop.deviceChosen(devReq.requestId, id || "");
+  if ($("devDialog").open) $("devDialog").close();
+}
+if (window.rfbDesktop) {
+  window.rfbDesktop.onChooseDevice((req) => {
+    devReq = req; devPick = null; devAnswered = false;
+    $("devTitle").textContent = req.kind === "usb" ? "Select the board in DFU mode" : "Select the flight controller's serial port";
+    $("devHint").textContent = req.kind === "usb"
+      ? "Usually \"STM32 BOOTLOADER\" (0483:df11)."
+      : "Rotorflight boards show as an STM32 virtual COM port (0483:5740).";
+    renderDevices();
+    $("devDialog").showModal();
+  });
+  window.rfbDesktop.onDevicesUpdated((req) => {
+    if (devReq && req.requestId === devReq.requestId) { devReq.devices = req.devices; renderDevices(); }
+  });
+  $("devList").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-dev]");
+    if (!b) return;
+    devPick = b.dataset.dev;
+    renderDevices();
+  });
+  $("devList").addEventListener("dblclick", (e) => {
+    const b = e.target.closest("[data-dev]");
+    if (b) answerDevice(b.dataset.dev);
+  });
+  $("devConnect").addEventListener("click", () => answerDevice(devPick));
+  $("devCancel").addEventListener("click", () => answerDevice(""));
+  // Closing any other way (Esc) must still answer, or the request would hang.
+  $("devDialog").addEventListener("close", () => answerDevice(""));
+}
+
 api("/api/state").then(async (s) => {
   renderJob(s.job);
   for (const l of s.log || []) appendLog(l.line, l.stream);
@@ -1725,10 +1944,9 @@ api("/api/option-info").then((r) => {
 
 api("/api/boards").then((r) => {
   boards = r.boards;
-  const last = recall("rfb.board");
-  if (last && boards.find((b) => b.key === last && !b.supported)) $("legacy").checked = true;
-  renderBoards(last && boards.some((b) => b.key === last) ? last : "");
-  if (last) pickBoard(last);
+  // No remembered board at start: it is shown when detected (or picked by hand).
+  renderBoards("");
+  autoDetectAtStart();
 }).catch((err) => {
   $("board").innerHTML = `<option value="">Board list unavailable</option>`;
   $("boardstatus").innerHTML = `<span class="warn">${esc(err.message)}</span>`;

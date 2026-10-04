@@ -7,7 +7,7 @@
 // Electron has no built-in device pickers for Web Serial (Detect board) or
 // WebUSB (DFU flashing), so this file provides small ones.
 
-import { app, BrowserWindow, dialog, Menu, session, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -37,7 +37,12 @@ async function createWindow() {
     backgroundColor: "#121417", // the Configurator's dark chrome, so there is no white flash on start
     icon: join(root, "build", "icon.png"),
     show: false,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      preload: join(here, "preload.cjs"), // the in-page device chooser bridge
+    },
   });
   win.once("ready-to-show", () => win.show());
 
@@ -57,52 +62,64 @@ async function createWindow() {
   ses.setDevicePermissionHandler((details) =>
     (details.deviceType === "serial" || details.deviceType === "usb") && ours(details.origin));
 
-  // navigator.serial.requestPort() — Detect board.
-  ses.on("select-serial-port", async (event, ports, _wc, callback) => {
-    event.preventDefault();
-    if (!ports.length) {
-      await dialog.showMessageBox(win, { type: "info", message: "No serial ports found.", detail: "Plug the flight controller in (without holding BOOT) and try again." });
-      return callback("");
+  // Device choosers (Detect board = serial, flashing = USB DFU). Electron has no
+  // built-in picker, so the list goes to the page, which shows it in the app's
+  // own card (like Chrome's chooser) and answers over IPC. While a chooser is
+  // open, devices plugged in or out update the list live.
+  const pending = new Map(); // requestId -> { kind, devices, callback }
+  let nextId = 1;
+  const isRF = (vid) => Number(vid) === STM32;
+  const serialEntry = (p) => ({
+    id: p.portId,
+    name: p.displayName || p.portName || "Serial port",
+    detail: [p.portName, p.vendorId ? `${hex4(Number(p.vendorId))}:${hex4(Number(p.productId))}` : ""].filter(Boolean).join(" · "),
+    rotorflight: isRF(p.vendorId),
+  });
+  const usbEntry = (d) => ({
+    id: d.deviceId,
+    name: d.productName || "USB device",
+    detail: [d.manufacturerName, `${hex4(d.vendorId)}:${hex4(d.productId)}`].filter(Boolean).join(" · "),
+    rotorflight: isRF(d.vendorId),
+  });
+  const sortRF = (list) => [...list].sort((a, b) => Number(b.rotorflight) - Number(a.rotorflight));
+  const ask = (kind, devices, callback) => {
+    const requestId = nextId++;
+    pending.set(requestId, { kind, devices: sortRF(devices), callback });
+    win.webContents.send("choose-device", { requestId, kind, devices: sortRF(devices) });
+  };
+  const update = (kind, change) => {
+    for (const [requestId, p] of pending) {
+      if (p.kind !== kind) continue;
+      p.devices = sortRF(change(p.devices));
+      win.webContents.send("devices-updated", { requestId, devices: p.devices });
     }
-    const sorted = [...ports].sort((a, b) => Number(b.vendorId === `${STM32}` || Number(b.vendorId) === STM32) - Number(a.vendorId === `${STM32}` || Number(a.vendorId) === STM32));
-    const labels = sorted.map((p) => `${p.portName}${p.displayName ? ` — ${p.displayName}` : ""}${p.vendorId ? ` (${hex4(Number(p.vendorId))}:${hex4(Number(p.productId))})` : ""}`);
-    const { response } = await dialog.showMessageBox(win, {
-      type: "question",
-      title: "Select serial port",
-      message: "Which serial port is the flight controller?",
-      detail: "Rotorflight boards usually show as an STM32 Virtual COM Port (0483:5740).",
-      buttons: [...labels, "Cancel"],
-      cancelId: labels.length,
-      defaultId: 0,
-      noLink: true,
-    });
-    callback(response < sorted.length ? sorted[response].portId : "");
+  };
+  ipcMain.removeAllListeners("device-chosen");
+  ipcMain.on("device-chosen", (e, { requestId, id }) => {
+    if (e.sender !== win.webContents) return;
+    const p = pending.get(requestId);
+    if (!p) return;
+    pending.delete(requestId);
+    const ok = id && p.devices.some((d) => d.id === id);
+    if (p.kind === "serial") p.callback(ok ? id : "");
+    else p.callback(ok ? id : undefined);
   });
 
-  // navigator.usb.requestDevice() — the DFU bootloader for flashing.
-  ses.on("select-usb-device", async (event, details, callback) => {
+  // navigator.serial.requestPort() — Detect board.
+  ses.on("select-serial-port", (event, ports, _wc, callback) => {
     event.preventDefault();
-    const devices = details.deviceList;
-    if (!devices.length) {
-      await dialog.showMessageBox(win, {
-        type: "info",
-        message: "No DFU device found.",
-        detail: "Put the board in DFU mode (hold BOOT while plugging in). On Windows the STM32 BOOTLOADER device needs the WinUSB driver.",
-      });
-      return callback();
-    }
-    const labels = devices.map((d) => `${d.productName || "USB device"} (${hex4(d.vendorId)}:${hex4(d.productId)})`);
-    const { response } = await dialog.showMessageBox(win, {
-      type: "question",
-      title: "Select DFU device",
-      message: "Which device is the board in DFU mode?",
-      buttons: [...labels, "Cancel"],
-      cancelId: labels.length,
-      defaultId: 0,
-      noLink: true,
-    });
-    callback(response < devices.length ? devices[response].deviceId : undefined);
+    ask("serial", ports.map(serialEntry), callback);
   });
+  ses.on("serial-port-added", (_e, port) => update("serial", (list) => [...list.filter((d) => d.id !== port.portId), serialEntry(port)]));
+  ses.on("serial-port-removed", (_e, port) => update("serial", (list) => list.filter((d) => d.id !== port.portId)));
+
+  // navigator.usb.requestDevice() — the DFU bootloader for flashing.
+  ses.on("select-usb-device", (event, details, callback) => {
+    event.preventDefault();
+    ask("usb", details.deviceList.map(usbEntry), callback);
+  });
+  ses.on("usb-device-added", (_e, device) => update("usb", (list) => [...list.filter((d) => d.id !== device.deviceId), usbEntry(device)]));
+  ses.on("usb-device-removed", (_e, device) => update("usb", (list) => list.filter((d) => d.id !== device.deviceId)));
 
   // Links to other sites open in the system browser, not inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -117,6 +134,17 @@ async function createWindow() {
   });
 
   await win.loadURL(server.url);
+
+  // Smoke test (RFB_SELFTEST=1): check the page and the device-chooser bridge, then quit.
+  if (process.env.RFB_SELFTEST) {
+    const result = await win.webContents.executeJavaScript(`({
+      bridge: typeof window.rfbDesktop?.onChooseDevice === "function",
+      chooser: !!document.getElementById("devDialog"),
+      title: document.title,
+    })`);
+    console.log("SELFTEST", JSON.stringify(result));
+    app.quit();
+  }
 }
 
 function buildMenu() {
