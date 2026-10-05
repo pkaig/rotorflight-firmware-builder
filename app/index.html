@@ -426,6 +426,40 @@
   dialog h2 { margin: 0 -16px 14px; padding: 12px 16px; font-size: 14px; font-weight: 600;
               background: var(--color-header-bg); color: var(--color-header-fg); border-bottom: 1px solid var(--color-border-soft); }
   .dlgbtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  /* Title-bar text button (Manual), in the header's quiet style. */
+  header .brand button.textbtn { background: transparent; color: var(--chrome-fg-muted); border-color: var(--chrome-border); height: 28px; }
+  header .brand button.textbtn:hover:not(:disabled) { background: var(--chrome-hover); color: var(--chrome-fg); }
+
+  /* The user manual: a large modal with its own scrolling body. */
+  dialog.manualdlg { width: min(1040px, calc(100vw - 32px)); height: calc(100vh - 48px); max-height: none; padding: 0;
+                     display: none; flex-direction: column; overflow: hidden; }
+  dialog.manualdlg[open] { display: flex; }
+  .manualhead { display: flex; align-items: center; background: var(--color-header-bg); border-bottom: 1px solid var(--color-border-soft); }
+  .manualhead h2 { margin: 0; border: 0; flex: 1; }
+  .manualhead .cardclose { margin-right: 10px; }
+  .manual { flex: 1; overflow: auto; padding: 4px 28px 28px; font-size: 13.5px; line-height: 1.6; outline: none; }
+  .manual h1 { font-size: 22px; margin: 18px 0 8px; }
+  .manual h2 { font-size: 17px; margin: 30px 0 10px; padding: 0 0 6px; background: none; border-bottom: 1px solid var(--color-border-soft); color: var(--color-text); }
+  .manual h3 { font-size: 14.5px; margin: 22px 0 6px; }
+  .manual h4 { font-size: 13.5px; margin: 16px 0 4px; }
+  .manual p, .manual ul, .manual ol, .manual table, .manual pre, .manual blockquote { margin: 0 0 12px; }
+  .manual ul, .manual ol { padding-left: 22px; }
+  .manual li { margin: 3px 0; }
+  .manual a { color: var(--color-accent-text); }
+  .manual code { font: 12px var(--font-mono); background: var(--color-surface-sunken); padding: 1px 5px; border-radius: var(--radius-xs); }
+  .manual pre { background: var(--color-surface-sunken); border: 1px solid var(--color-border-soft); border-radius: var(--radius-sm);
+                padding: 10px 12px; overflow: auto; }
+  .manual pre code { background: none; padding: 0; font-size: 12px; line-height: 1.5; }
+  .manual table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .manual th, .manual td { border: 1px solid var(--color-border-soft); padding: 6px 9px; text-align: left; vertical-align: top; }
+  .manual th { background: var(--color-surface-sunken); font-weight: 600; }
+  .manual img { max-width: 100%; height: auto; display: block; margin: 4px 0; border: 1px solid var(--color-border-soft);
+                border-radius: var(--radius-sm); }
+  .manual blockquote { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--color-warning-soft);
+                       box-shadow: inset 3px 0 0 var(--color-warning); }
+  .manual blockquote p { margin: 0; }
+  .manual hr { border: 0; border-top: 1px solid var(--color-border-soft); margin: 24px 0; }
   #flashInfo dl { display: grid; grid-template-columns: 110px 1fr; gap: 5px 10px; font-size: 12.5px; margin: 0; }
   #flashInfo dt { color: var(--color-text-muted); }
   #flashInfo dd { margin: 0; overflow-wrap: anywhere; }
@@ -454,6 +488,7 @@
     <span class="appname">Firmware Builder</span>
     <span class="status" id="status">idle</span>
     <span class="spacer"></span>
+    <button class="textbtn" id="manualBtn" title="Open the user manual" aria-haspopup="dialog">Manual</button>
     <button class="icon" id="themeToggle" title="Switch between dark and light theme" aria-label="Switch theme">◐</button>
   </div>
   <div class="boardrow">
@@ -556,6 +591,14 @@
   <h2 id="cardTitle">Option details <button class="cardclose" id="cardClose" aria-label="Close option details" title="Close (Esc)">&#x2715;</button></h2>
   <div id="cardBody"></div>
 </section>
+
+<dialog id="manualDialog" class="manualdlg" aria-labelledby="manualTitle">
+  <div class="manualhead">
+    <h2 id="manualTitle">User manual</h2>
+    <button class="cardclose" id="manualClose" aria-label="Close the manual" title="Close (Esc)">&#x2715;</button>
+  </div>
+  <div id="manualBody" class="manual" tabindex="-1"><p class="muted">Loading the manual…</p></div>
+</dialog>
 
 <dialog id="devDialog" aria-labelledby="devTitle">
   <h2 id="devTitle">Select a device</h2>
@@ -2008,6 +2051,39 @@ if (window.rfbDesktop) {
   // Closing any other way (Esc) must still answer, or the request would hang.
   $("devDialog").addEventListener("close", () => answerDevice(""));
 }
+
+// --- user manual -----------------------------------------------------------------
+// docs/Rotorflight-firmware-build-manual.md, rendered by the server and shipped with
+// the app, so it works offline and always matches this version.
+let manualLoaded = false;
+async function openManual(anchor) {
+  $("manualDialog").showModal();
+  if (!manualLoaded) {
+    try {
+      const r = await fetch("/api/manual");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      $("manualBody").innerHTML = await r.text();
+      manualLoaded = true;
+    } catch (err) {
+      $("manualBody").innerHTML = `<p class="warn">The manual could not be loaded: ${esc(err.message)}</p>`;
+      return;
+    }
+  }
+  const target = anchor && $("manualBody").querySelector(`[id="${CSS.escape(anchor)}"]`);
+  if (target) target.scrollIntoView({ block: "start" });
+  else $("manualBody").scrollTop = 0;
+  $("manualBody").focus({ preventScroll: true });
+}
+$("manualBtn").addEventListener("click", () => openManual());
+$("manualClose").addEventListener("click", () => $("manualDialog").close());
+// Contents and cross-reference links scroll within the manual.
+$("manualBody").addEventListener("click", (e) => {
+  const a = e.target.closest('a[href^="#"]');
+  if (!a) return;
+  e.preventDefault();
+  const target = $("manualBody").querySelector(`[id="${CSS.escape(decodeURIComponent(a.getAttribute("href").slice(1)))}"]`);
+  target?.scrollIntoView({ block: "start", behavior: "smooth" });
+});
 
 // The log: click (or Enter/Space) toggles 10 / 20 lines. Selecting text does not toggle.
 {

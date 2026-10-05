@@ -17,6 +17,9 @@ It comes as:
 
 ## Desktop app
 
+The full, illustrated guide is the
+[user manual](docs/Rotorflight-firmware-build-manual.md). In short:
+
 ### Install
 
 Run `Rotorflight Firmware Builder Setup <version>.exe`, or use the portable

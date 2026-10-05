@@ -44,11 +44,13 @@ import { listReleases, nearestRelease, releaseHexSize, treeVersion, type Release
 import { buildSizeModel, estimateRemoval, type MemoryRegion, type SizeModel } from "../size.ts";
 import { cachedSourcePath } from "../source.ts";
 import { listDirs, normalisePath } from "./dirs.ts";
+import { renderMarkdown } from "./markdown.ts";
 import { needsMirror, syncMirror } from "./mirror.ts";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const PAGE = join(ROOT, "app", "index.html");
 const OPTION_INFO = join(ROOT, "data", "option-info.json");
+const MANUAL = join(ROOT, "docs", "Rotorflight-firmware-build-manual.md");
 
 interface Session {
   ref: string;
@@ -545,6 +547,16 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url ?? "/", "http://localhost");
   const route = `${req.method} ${url.pathname}`;
 
+  // The manual's pictures (docs/images/*.png); plain names only, so no path escapes.
+  const manualImage = req.method === "GET" && url.pathname.match(/^\/docs\/images\/([a-z0-9-]+\.png)$/);
+  if (manualImage) {
+    const file = join(ROOT, "docs", "images", manualImage[1]!);
+    if (!existsSync(file)) return send(res, 404, { error: "not found" });
+    res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=3600" });
+    res.end(await readFile(file));
+    return;
+  }
+
   switch (route) {
     case "GET /":
       // Never cache the app: a stale tab would run old flashing code.
@@ -565,6 +577,14 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       res.writeHead(200, { "content-type": "font/woff2", "cache-control": "max-age=31536000, immutable" });
       res.end(await readFile(join(ROOT, "app", url.pathname.slice(1))));
       return;
+
+    case "GET /api/manual": {
+      // The user manual, rendered for the in-app Manual window. It ships with the app.
+      const md = await readFile(MANUAL, "utf8");
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(renderMarkdown(md, { imageBase: "/docs/" }));
+      return;
+    }
 
     case "GET /flasher.js":
       res.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });

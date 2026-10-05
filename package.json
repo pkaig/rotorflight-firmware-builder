@@ -49,6 +49,8 @@
       "app/**",
       "data/**",
       "electron/**",
+      "docs/Rotorflight-firmware-build-manual.md",
+      "docs/images/**",
       "build/icon.png",
       "package.json",
       "!**/*.map",
