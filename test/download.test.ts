@@ -41,3 +41,13 @@ test("sha256File hashes a file", async (t) => {
   await writeFile(join(dir, "x"), "abc");
   assert.equal(await sha256File(join(dir, "x")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 });
+
+test("toolchainEnv puts the toolchain first on PATH, whatever the key's spelling", async () => {
+  const { toolchainEnv } = await import("../src/toolchain.ts");
+  const sep = process.platform === "win32" ? ";" : ":";
+  assert.equal(toolchainEnv("/tc/bin", { PATH: "/usr/bin" }).PATH, `/tc/bin${sep}/usr/bin`);
+  const win = toolchainEnv("C:\\tc\\bin", { Path: "C:\\Windows" });
+  assert.deepEqual(Object.keys(win), ["Path"]); // no second PATH key
+  assert.equal(win.Path, `C:\\tc\\bin${sep}C:\\Windows`);
+  assert.equal(toolchainEnv("/tc/bin", {}).PATH, "/tc/bin");
+});

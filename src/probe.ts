@@ -4,6 +4,7 @@ import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { BuildToolError } from "./errors.ts";
 import { exec } from "./exec.ts";
+import { toolchainEnv } from "./toolchain.ts";
 
 /**
  * Ask the real preprocessor which `USE_XXX` options a target can actually change.
@@ -469,7 +470,9 @@ async function targetCflags(ctx: ProbeContext): Promise<string> {
     r = await exec(
       "make",
       ["-f", "Makefile", "-f", mk, `TARGET=${ctx.target}`, ...vars, "rfb-print-cflags"],
-      { cwd: ctx.sourceDir },
+      // The same toolchain-first PATH as a build: without it, a tree with no tools/
+      // folder of its own fails here with "arm-none-eabi-gcc not in the PATH".
+      { cwd: ctx.sourceDir, env: toolchainEnv(ctx.binDir) },
     );
   } finally {
     await rm(dir, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { BuildToolError } from "./errors.ts";
 import { sourcesDir } from "./config.ts";
 import { exec, execCapture, type ExecEvent } from "./exec.ts";
@@ -128,6 +128,22 @@ async function findCachedToolchain(sdkDirName: string, requiredVersion: string):
     if ((await tryGccVersion(join(bin, gccName()))) === requiredVersion) return bin;
   }
   return undefined;
+}
+
+/**
+ * The environment for every `make` that touches a firmware tree: the resolved
+ * toolchain first on PATH. The firmware's make/tools.mk uses its own tools/
+ * folder when there is one, and otherwise runs `arm-none-eabi-gcc -dumpversion`
+ * from PATH and stops with "arm-none-eabi-gcc not in the PATH" if that fails —
+ * so a local tree without tools/ (e.g. a fresh clone) needs this even for the
+ * probe's CFLAGS query, not only for the build.
+ */
+export function toolchainEnv(binDir: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...base };
+  // Windows spells it "Path": update that key rather than adding a second PATH.
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  env[key] = env[key] ? `${binDir}${delimiter}${env[key]}` : binDir;
+  return env;
 }
 
 function gccName(): string {

@@ -6,6 +6,7 @@ import { availableParallelism } from "node:os";
 import { BuildToolError } from "./errors.ts";
 import { exec, execCapture, type ExecEvent } from "./exec.ts";
 import { parseMemoryUsage, type MemoryRegion } from "./size.ts";
+import { toolchainEnv } from "./toolchain.ts";
 
 /**
  * Rotorflight's Makefile (as of release/4.6.0) has NO dependency on the value of
@@ -75,11 +76,7 @@ export async function runBuild(input: BuildInput): Promise<BuildResult> {
   const jobs = input.jobs ?? availableParallelism();
   const start = Date.now();
 
-  const sep = process.platform === "win32" ? ";" : ":";
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    PATH: `${binDir}${sep}${process.env.PATH ?? ""}`,
-  };
+  const env = toolchainEnv(binDir);
   const run = (extraArgs: string[]) =>
     exec("make", extraArgs, { cwd: sourceDir, env, onEvent: input.onEvent });
 
