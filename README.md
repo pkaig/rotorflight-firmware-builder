@@ -10,7 +10,8 @@ to be hosted or maintained.
 
 It comes as:
 
-- a **desktop app** (Windows installer or portable `.exe`, built with Electron),
+- a **desktop app** for Windows (installer or portable `.exe`) and Linux
+  (AppImage or `.tar.gz`), built with Electron,
 - the same app as a **local web page** (`npm run app`, for Edge or Chrome),
 - a **command-line tool** (`rf-buildtool`) and a Node module (`buildFirmware()`).
 
@@ -38,6 +39,36 @@ installed. Nothing unsigned is bundled with the app.
 
 Finished builds go to `Documents\Rotorflight Firmware Builder` (**File → Open
 builds folder**).
+
+### Linux
+
+Use `rotorflight-firmware-builder-<version>-x86_64.AppImage` (mark it
+executable, then run it), or unpack the `.tar.gz` and run
+`rotorflight-firmware-builder` inside it.
+
+- **Build tools:** `make`, `git`, `tar` and `bzip2`. The app lists any that are
+  missing, e.g. `sudo apt install make git tar bzip2`. The ARM compiler
+  downloads and is verified automatically, as on Windows.
+- **AppImage:** needs FUSE 2 (`sudo apt install libfuse2t64`, or `libfuse2` on
+  older releases). Without it, run it with `--appimage-extract-and-run`.
+- **Serial port (Detect board):** add yourself to the `dialout` group, then log
+  out and back in: `sudo usermod -aG dialout $USER`.
+- **DFU (flashing):** give your user access to the STM32 bootloader with a udev
+  rule, as for the Configurator:
+
+  ```sh
+  echo 'SUBSYSTEM=="usb", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="df11", MODE="0664", GROUP="plugdev"' \
+    | sudo tee /etc/udev/rules.d/45-stdfu-permissions.rules
+  sudo udevadm control --reload-rules
+  ```
+
+  and make sure you are in the `plugdev` group.
+- **Sandbox:** Ubuntu 24.04 and later restrict the user namespaces Electron's
+  sandbox uses. If the app exits at start with a sandbox error, run it with
+  `--no-sandbox`. From the `.tar.gz`, you can instead make the sandbox helper
+  setuid root: `sudo chown root chrome-sandbox && sudo chmod 4755 chrome-sandbox`.
+
+Builds go to `~/Documents/Rotorflight Firmware Builder`.
 
 ### Using it
 
@@ -146,7 +177,15 @@ npm install
 npm run desktop     # the desktop app
 npm run app         # the same app in your browser: http://localhost:4780
 npm run dist:win    # Windows installer + portable .exe into release/
+npm run dist:linux  # Linux AppImage + .tar.gz into release/ (run on Linux, e.g. WSL)
 ```
+
+To build the Linux release from Windows, copy the project into WSL's own
+filesystem (not `/mnt/c`), then `npm ci` and `npm run dist:linux` there. If
+`npm ci` skips Electron's download, run `node node_modules/electron/install.js`.
+Some distributions' Node 22 (Ubuntu's included) has no TypeScript support, so
+run the tests there with Electron's Node:
+`ELECTRON_RUN_AS_NODE=1 ./node_modules/electron/dist/electron --test test/*.test.ts test/*.test.js`.
 
 `npm run app` options: `--port <n>`, `--host <h>`. The server only listens on
 127.0.0.1 and only answers its own page: requests with a foreign `Host` header,
@@ -160,7 +199,7 @@ Build environment by platform:
   rsync before each probe and build, because the firmware Makefile's
   `git diff --shortstat` is impractically slow over `/mnt/c`. The mirror never
   writes to your folder.
-- **Linux / macOS**: `make` and `git` on PATH.
+- **Linux / macOS**: `make`, `git`, `tar` and `bzip2` on PATH.
 
 Environment variables:
 
@@ -221,7 +260,9 @@ npm run typecheck
 Validated on Windows, natively and under WSL: a `--config-erase` build of
 `release/4.6.0` matches the official release hex byte for byte apart from the
 embedded build timestamp, and Build & flash has been flashed and verified on a
-real board. Not yet wired into the Configurator.
+real board. The Linux desktop app has been tested under WSL (Ubuntu 26.04):
+load, build (same firmware size as Windows) and delete. Detect and flashing on
+Linux are not yet tested on hardware. Not yet wired into the Configurator.
 
 Stripping stock features needs guards in the firmware (see
 [Firmware guards](#firmware-guards) and

@@ -48,14 +48,36 @@ export async function detectBuildEnv(force = false): Promise<BuildEnv> {
   return cached;
 }
 
+/**
+ * Linux/macOS: the firmware build runs make and git; the toolchain archive (the
+ * app downloads and verifies it) is unpacked by the Makefile with tar -xj, so
+ * tar and bzip2 are needed too.
+ */
 async function detectPosix(): Promise<BuildEnv> {
   const path = process.env.PATH ?? "";
-  const problems: string[] = [];
-  const make = await which("make", path);
-  const git = await which("git", path);
-  if (!make) problems.push("GNU make was not found on PATH.");
-  if (!git) problems.push("git was not found on PATH.");
-  return { ok: problems.length === 0, mode: problems.length ? "missing" : "native", path, make, git, shell: "/bin/sh", problems };
+  const need = [
+    { cmd: "make", what: "GNU make", pkg: "make" },
+    { cmd: "git", what: "git", pkg: "git" },
+    { cmd: "tar", what: "tar", pkg: "tar" },
+    { cmd: "bzip2", what: "bzip2", pkg: "bzip2" },
+  ];
+  const found = new Map<string, string | undefined>();
+  for (const n of need) found.set(n.cmd, await which(n.cmd, path));
+  const missing = need.filter((n) => !found.get(n.cmd));
+  const problems = missing.map((n) => `${n.what} was not found on PATH.`);
+  if (missing.length && process.platform === "linux") {
+    const pkgs = missing.map((n) => n.pkg).join(" ");
+    problems.push(`Install with your package manager, e.g. sudo apt install ${pkgs} (Debian/Ubuntu) or sudo dnf install ${pkgs} (Fedora).`);
+  }
+  return {
+    ok: missing.length === 0,
+    mode: missing.length ? "missing" : "native",
+    path,
+    make: found.get("make"),
+    git: found.get("git"),
+    shell: "/bin/sh",
+    problems,
+  };
 }
 
 async function detectWindows(): Promise<BuildEnv> {

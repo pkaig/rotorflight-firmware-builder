@@ -662,6 +662,15 @@ let lastPort = null; // the serial port granted by Detect, reused to reboot into
 function canFlash() { return !!lastPort || dfuPresent; }
 const FLASH_HINT = "Detect the board first (or put it in DFU mode by holding BOOT while plugging in).";
 
+// Device-access advice differs by OS (the server reports its platform in /api/env).
+const onLinux = () => buildEnvInfo?.platform === "linux";
+const serialAccessHint = () => onLinux()
+  ? " On Linux, add yourself to the dialout group (sudo usermod -aG dialout $USER), then log out and back in. Also close the Configurator or anything else using the port."
+  : " Close the Configurator or anything else using the port.";
+const dfuAccessHint = () => onLinux()
+  ? " On Linux the DFU device (0483:df11) needs a udev rule that gives you access, as for the Configurator (see the README)."
+  : " On Windows the DFU device needs the WinUSB driver (e.g. ImpulseRC Driver Fixer or Zadig), as for the Configurator.";
+
 function updateButtons() {
   $("build").disabled = !session || !!busy || previewBad || selectionDiffers();
   $("buildFlash").disabled = $("build").disabled || !canFlash();
@@ -1455,7 +1464,7 @@ async function detectOn(port, { auto = false } = {}) {
     } else {
       const busyPort = /open|access|in use|lock/i.test(err.message);
       $("boardstatus").innerHTML = `<span class="warn">Detect failed: ${esc(err.message)}` +
-        (busyPort ? " — close the Configurator or anything else using the port." : "") + `</span> Pick the board from the list instead.`;
+        (busyPort ? serialAccessHint() : "") + `</span> Pick the board from the list instead.`;
     }
   } finally {
     detecting = false;
@@ -1703,8 +1712,7 @@ async function runFlash(device) {
     });
     setFlashStage("Flashed and verified. The board is restarting with the new firmware.", "okbox");
   } catch (err) {
-    const driver = /access|denied|security|claim/i.test(err.message)
-      ? " On Windows the DFU device needs the WinUSB driver (e.g. ImpulseRC Driver Fixer or Zadig), as for the Configurator." : "";
+    const driver = /access|denied|security|claim/i.test(err.message) ? dfuAccessHint() : "";
     setFlashStage(`Flash failed: ${err.message}.${driver} The ROM bootloader is still there; the board stays in DFU, so Try again picks it up directly.`, "warnbox");
     $("flashRetry").hidden = false;
   } finally {
@@ -1750,7 +1758,7 @@ async function startFlash() {
       rebooted = true;
     } catch (err) {
       setFlashStage(`Could not reboot it over USB serial: ${err.message}.` +
-        (/open|access|in use|lock/i.test(err.message) ? " Close the Configurator or anything else using the port." : ""));
+        (/open|access|in use|lock/i.test(err.message) ? serialAccessHint() : ""));
     }
   } else {
     setFlashStage("No serial port granted yet (use Detect first), so the board cannot be rebooted from here.");
@@ -1766,9 +1774,10 @@ async function startFlash() {
     setFlashStage("The board is still on its serial port, so it did not switch to DFU. Put it in DFU by hand " +
       "(hold the BOOT button while plugging in), then press Try again.", "warnbox");
   } else if (rebooted) {
-    setFlashStage("The board left its serial port but no DFU device appeared. On Windows this is usually the driver: in Device Manager, " +
-      "“STM32 BOOTLOADER” needs the WinUSB driver (ImpulseRC Driver Fixer or Zadig). Or, if the browser has not been " +
-      "allowed to use it yet, click Select DFU device…", "warnbox");
+    setFlashStage("The board left its serial port but no DFU device appeared. " + (onLinux()
+      ? "On Linux this is usually access: “STM32 BOOTLOADER” (0483:df11) needs a udev rule (see the README). "
+      : "On Windows this is usually the driver: in Device Manager, “STM32 BOOTLOADER” needs the WinUSB driver (ImpulseRC Driver Fixer or Zadig). ") +
+      "Or, if the app has not been allowed to use it yet, click Select DFU device…", "warnbox");
   } else {
     setFlashStage("No DFU device found. Put the board in DFU by hand (hold BOOT while plugging in) and press Try again, " +
       "or click Select DFU device… if it is already in DFU.", "warnbox");
@@ -1917,7 +1926,7 @@ function showEnv(env) {
   }
   $("envNote").hidden = false;
   $("envNote").innerHTML = `<b>Firmware builds need a few tools that were not found:</b><ul>` +
-    env.problems.map((p) => `<li>${esc(p).replace(/(winget install [\w.]+)/, "<code>$1</code>")}</li>`).join("") + `</ul>` +
+    env.problems.map((p) => `<li>${esc(p).replace(/(winget install [\w.]+|sudo (?:apt|dnf) install [\w ]+?)(?= \(|$)/g, "<code>$1</code>")}</li>`).join("") + `</ul>` +
     (env.canInstall
       ? `<button class="primary" id="envInstall">Load build environment…</button>`
       : `Install them, then restart the app. Loading and building will fail until then.`);

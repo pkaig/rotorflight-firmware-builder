@@ -27,6 +27,7 @@
     "desktop": "tsc -p tsconfig.build.json && electron .",
     "splash": "electron build/make-splash.mjs",
     "dist:win": "tsc -p tsconfig.build.json && electron build/make-splash.mjs && electron-builder --win",
+    "dist:linux": "tsc -p tsconfig.build.json && electron-builder --linux",
     "dist:dir": "tsc -p tsconfig.build.json && electron-builder --dir"
   },
   "devDependencies": {
@@ -68,6 +69,17 @@
     "portable": {
       "artifactName": "${productName}-${version}-portable.${ext}",
       "splashImage": "build/portable-splash.bmp"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "icon": "build/icon.png",
+      "category": "Development",
+      "executableName": "rotorflight-firmware-builder",
+      "artifactName": "rotorflight-firmware-builder-${version}-${arch}.${ext}",
+      "synopsis": "Build custom Rotorflight firmware locally and flash it"
     }
   },
   "author": "Phil Kaighin (PDK)"
