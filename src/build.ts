@@ -156,7 +156,7 @@ function sizeName(): string {
 
 async function sizeReport(sizeBin: string, elf: string): Promise<SizeReport | undefined> {
   try {
-    // `size -A` Berkeley/sysv output; parse the common `size` default table.
+    // `size`'s default (Berkeley) table: text data bss dec hex filename, last line.
     const out = await execCapture(sizeBin, [elf]);
     const line = out.trim().split("\n").at(-1) ?? "";
     const nums = line.trim().split(/\s+/).map(Number);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sha256File, toolchainUrl, TOOLCHAIN_SHA256 } from "../src/download.ts";
@@ -20,8 +20,9 @@ ifeq ($(OSFAMILY), windows)
 endif
 `;
 
-test("derives this OS's toolchain archive URL from tools.mk", async () => {
+test("derives this OS's toolchain archive URL from tools.mk", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "rfb-dl-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   await mkdir(join(dir, "make"));
   await writeFile(join(dir, "make", "tools.mk"), TOOLS_MK);
   const url = await toolchainUrl(dir);
@@ -34,8 +35,9 @@ test("pins checksums for the Windows and Linux 9-2020-q2 archives", () => {
   assert.match(TOOLCHAIN_SHA256["gcc-arm-none-eabi-9-2020-q2-update-x86_64-linux.tar.bz2"]!, /^[0-9a-f]{64}$/);
 });
 
-test("sha256File hashes a file", async () => {
+test("sha256File hashes a file", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "rfb-dl-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   await writeFile(join(dir, "x"), "abc");
   assert.equal(await sha256File(join(dir, "x")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 });

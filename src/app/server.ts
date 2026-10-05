@@ -1,21 +1,24 @@
 #!/usr/bin/env node
 /**
- * Sample app: a local web UI with one toggle per firmware option, to prove (or
- * disprove) the select -> build process end to end. Zero dependencies — a
- * node:http server driving the same `buildFirmware()` the CLI uses.
+ * The app server: a local web UI with one toggle per firmware option, a flash
+ * budget, builds and flashing. Zero dependencies — a node:http server driving
+ * the same `buildFirmware()` the CLI uses.
  *
- * Run it where the firmware builds (WSL on Windows), open the printed URL in a
- * browser. WSL2 forwards localhost, so a Windows browser reaches it directly.
+ * The desktop (Electron) app runs it in-process on a free port. `npm run app`
+ * runs it standalone for a browser: on Windows it builds natively when Git for
+ * Windows and GNU make are present, and otherwise hands itself off to WSL
+ * (which forwards localhost, so the Windows browser still reaches it).
  */
 
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { detectBuildEnv, installBuildTools, type BuildEnv } from "../buildenv.ts";
-import { readFile } from "node:fs/promises";
-import { basename, dirname, join, resolve as resolvePath } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
+import { detectBuildEnv, installBuildTools, type BuildEnv } from "../buildenv.ts";
 import {
   buildFirmware,
   ensureSource,
@@ -31,20 +34,17 @@ import {
   type ProbeResult,
   type Selection,
 } from "../index.ts";
-import { DEFAULT_OUTPUT_DIR } from "../config.ts";
-import { boardTarget, listBoards } from "../boards.ts";
-import { annotateOptions, loadOptionInfo } from "../option-info.ts";
-import { cachedSourcePath } from "../source.ts";
-import { boardConfig } from "../boards.ts";
-import { insertConfig, parseHex, prepareBoardConfig } from "../hex.ts";
-import { listReleases, nearestRelease, releaseHexSize, treeVersion, type ReleaseSize } from "../releases.ts";
+import { boardConfig, boardTarget, listBoards } from "../boards.ts";
+import { cacheRoot, DEFAULT_OUTPUT_DIR } from "../config.ts";
 import { exec } from "../exec.ts";
+import { insertConfig, parseHex, prepareBoardConfig } from "../hex.ts";
+import { annotateOptions, loadOptionInfo } from "../option-info.ts";
+import { sweepProbeTemp } from "../probe.ts";
+import { listReleases, nearestRelease, releaseHexSize, treeVersion, type ReleaseSize } from "../releases.ts";
+import { buildSizeModel, estimateRemoval, type MemoryRegion, type SizeModel } from "../size.ts";
+import { cachedSourcePath } from "../source.ts";
 import { listDirs, normalisePath } from "./dirs.ts";
 import { needsMirror, syncMirror } from "./mirror.ts";
-import { buildSizeModel, estimateRemoval, type MemoryRegion, type SizeModel } from "../size.ts";
-import { cacheRoot } from "../config.ts";
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
 
 const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const PAGE = join(ROOT, "app", "index.html");
@@ -303,21 +303,25 @@ async function load(req: LoadRequest) {
   if (!targets.includes(req.target)) throw new Error(`Unknown target ${req.target}`);
 
   log("Checking toolchain…");
-  step("Checking toolchain (first time: downloads about 100 MB)");
+  step("Checking toolchain (first time: downloads about 180 MB)");
   const toolchain = await ensureToolchain(source.dir, onEvent, { borrow: Boolean(req.sourceDir) });
   if (toolchain.borrowed) log(`Using the cached ${toolchain.version} toolchain at ${toolchain.binDir} (this tree's own tools/ does not run here).`);
 
   const makeVars: Record<string, string> = req.configErase ? { FLASH_CONFIG_ERASE: "yes" } : {};
   log(`Probing ${req.target} options with arm-none-eabi-gcc ${toolchain.version} -E…`);
   const ctx = { sourceDir: source.dir, target: req.target, binDir: toolchain.binDir, extraMakeVars: makeVars };
-  let lastPct = -1;
-  const probe = await probeOptions(ctx, (done, total) => {
-    const pct = Math.floor((done / total) * 10) * 10;
-    if (pct !== lastPct) emit("progress", { done, total }), (lastPct = pct);
-    step("Probing options with the preprocessor", done, total);
-  });
+  // One preprocessor serves the probe and then the session's previews.
+  const pp = await TargetPreprocessor.create(ctx);
+  let probe: ProbeResult;
+  try {
+    probe = await probeOptions(ctx, (done, total) => step("Probing options with the preprocessor", done, total), pp);
+  } catch (err) {
+    await pp.dispose();
+    throw err;
+  }
   log(`Probed ${probe.options.length} options in ${(probe.durationMs / 1000).toFixed(1)}s.`);
 
+  await session?.pp.dispose();
   session = {
     ref: req.ref,
     commit: source.commit,
@@ -326,7 +330,7 @@ async function load(req: LoadRequest) {
     ...(origin ? { origin } : {}),
     target: req.target,
     makeVars,
-    pp: await TargetPreprocessor.create(ctx),
+    pp,
     // Re-read each load so edits to the data file show up without a restart.
     probe: { ...probe, options: annotateOptions(await loadOptionInfo(OPTION_INFO), probe) },
     binDir: toolchain.binDir,
@@ -379,7 +383,8 @@ async function load(req: LoadRequest) {
   emit("session", publicSession());
 }
 
-async function build(sel: Selection, name?: string) {
+/** `at` identifies the build: its history entry and output folder carry it. */
+async function build(sel: Selection, at: string, name?: string) {
   const s = session!;
   const options = selectionOptions(sel, guardMap(s.probe));
   if (s.origin) {
@@ -395,7 +400,6 @@ async function build(sel: Selection, name?: string) {
   log(`Building ${s.target} with OPTIONS="${options.join(" ")}"…`);
   const totalKey = `${s.sourceDir}|${s.target}`;
   let compiled = 0;
-  const at = new Date().toISOString();
   try {
     const r = await buildFirmware({
       target: s.target,
@@ -487,10 +491,49 @@ function validSelection(body: unknown): Selection | undefined {
   return { add: b.add, remove: b.remove };
 }
 
+/** A request the client got wrong: answered with 400 rather than 500. */
+class BadRequest extends Error {}
+
+const MAX_BODY = 1024 * 1024;
+
 async function readJson(req: IncomingMessage): Promise<unknown> {
   let body = "";
-  for await (const chunk of req) body += chunk;
-  return body ? JSON.parse(body) : {};
+  for await (const chunk of req) {
+    body += chunk;
+    if (body.length > MAX_BODY) throw new BadRequest("request body too large");
+  }
+  try {
+    return body ? JSON.parse(body) : {};
+  } catch {
+    throw new BadRequest("request body is not valid JSON");
+  }
+}
+
+/**
+ * Only this machine's own page may use the API. Without these checks any
+ * website open in the browser could drive it: a cross-site form-style POST
+ * (text/plain) needs no CORS preflight, and DNS rebinding lets a foreign
+ * hostname resolve to 127.0.0.1 and read the replies.
+ * - Host must be a loopback name, so a rebound hostname is refused.
+ * - A POST must be JSON, which a cross-site page cannot send without a
+ *   preflight this server never approves, and any Origin must be our own.
+ */
+function refuseForeign(req: IncomingMessage): string | undefined {
+  const port = req.socket.localPort;
+  const local = ["localhost", "127.0.0.1", "[::1]"].map((h) => `${h}:${port}`);
+  if (!local.includes(req.headers.host ?? "")) return "unexpected Host header";
+  if (req.method === "POST") {
+    if (!/^application\/json\b/i.test(req.headers["content-type"] ?? "")) return "POST must be application/json";
+    const origin = req.headers.origin;
+    if (origin && !local.some((h) => origin === `http://${h}`)) return "cross-origin request";
+  }
+  return undefined;
+}
+
+/** Is `dir` inside the app's own output folder (and not the folder itself)? */
+function insideOutputDir(dir: string): boolean {
+  const rel = relative(DEFAULT_OUTPUT_DIR, dir);
+  return !!rel && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 function send(res: ServerResponse, status: number, data: unknown) {
@@ -513,6 +556,13 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     case "GET /assets/rotorflight-logo-compact.svg":
       // The Rotorflight logo, from the Configurator (white + Rotorflight blue, for the dark header bar).
       res.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "max-age=86400" });
+      res.end(await readFile(join(ROOT, "app", url.pathname.slice(1))));
+      return;
+
+    case "GET /assets/fonts/open-sans-latin.woff2":
+    case "GET /assets/fonts/jetbrains-mono-latin.woff2":
+      // Bundled so the page never waits on Google Fonts (or fails offline).
+      res.writeHead(200, { "content-type": "font/woff2", "cache-control": "max-age=31536000, immutable" });
       res.end(await readFile(join(ROOT, "app", url.pathname.slice(1))));
       return;
 
@@ -699,22 +749,23 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const { at } = (await readJson(req)) as { at?: string };
       const i = history.findIndex((h) => h.at === at);
       if (i < 0) return send(res, 404, { error: "no such build" });
-      if (busy === "build" && i === history.length - 1) return send(res, 409, { error: "that build is still running" });
+      // (A running build is not in the history until it finishes, so it cannot be picked here.)
       const [entry] = history.splice(i, 1);
       const removed: string[] = [];
       // Only ever delete the app's own output folder for this build.
       const dir = entry!.hexPath ? dirname(entry!.hexPath) : "";
-      if (dir && dir.startsWith(DEFAULT_OUTPUT_DIR) && existsSync(dir)) {
+      if (dir && insideOutputDir(dir) && existsSync(dir)) {
         await rm(dir, { recursive: true, force: true });
         removed.push(dir);
       }
       // A deleted baseline build takes its ELF with it: forget the measured baseline.
+      const inDir = (p?: string) => !!p && !!dir && dirname(p) === dir;
       const records = await readBaselines();
-      const stale = Object.keys(records).filter((k) => records[k]!.elfPath && dir && records[k]!.elfPath!.startsWith(dir));
+      const stale = Object.keys(records).filter((k) => inDir(records[k]!.elfPath));
       if (stale.length) {
         for (const k of stale) delete records[k];
         await writeFile(SIZES_FILE(), JSON.stringify(records, null, 2));
-        if (session && session.sizes.baseline?.elfPath?.startsWith(dir)) {
+        if (session && inDir(session.sizes.baseline?.elfPath)) {
           session.model = undefined;
           session.sizes.located = undefined;
           session.sizes.baseline = session.sizes.official
@@ -738,13 +789,14 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const name = cleanName((body as { name?: unknown }).name);
       const n = sel.add.length + sel.remove.length;
       const what = name ? `"${name}"` : `${session!.target}${n ? ` with ${n} change${n > 1 ? "s" : ""}` : " baseline"}`;
-      const started = startJob("build", `Building ${what}`, () => build(sel, name));
-      return send(res, started ? 202 : 409, started ? { ok: true } : { error: `busy: ${busy}` });
+      // Returned so the page can follow this exact build (e.g. to flash it when done).
+      const at = new Date().toISOString();
+      const started = startJob("build", `Building ${what}`, () => build(sel, at, name));
+      return send(res, started ? 202 : 409, started ? { ok: true, at } : { error: `busy: ${busy}` });
     }
   }
   send(res, 404, { error: "not found" });
 }
-
 
 /** The build environment found at start-up (make, git, shell), reported to the page. */
 let buildEnv: BuildEnv | undefined;
@@ -764,19 +816,27 @@ export async function startServer(opts: { port?: number; host?: string } = {}): 
   // Every build process (make, git, sh, gcc) inherits this PATH.
   if (buildEnv.ok) process.env.PATH = buildEnv.path;
   for (const p of buildEnv.problems) process.stderr.write(`Build environment: ${p}\n`);
+  // Preprocessor scratch folders left behind by earlier runs.
+  sweepProbeTemp().catch(() => {});
 
   const host = opts.host ?? "127.0.0.1";
   return new Promise((resolvePromise, reject) => {
     const server = createServer((req, res) => {
+      const refused = refuseForeign(req);
+      if (refused) return send(res, 403, { error: `Forbidden: ${refused}.` });
       handle(req, res).catch((err) => {
-        if (!res.headersSent) send(res, 500, { error: String(err) });
-        else res.end();
+        if (res.headersSent) res.end();
+        else send(res, err instanceof BadRequest ? 400 : 500, { error: err instanceof BadRequest ? err.message : String(err) });
       });
     });
     server.once("error", reject);
     server.listen(opts.port ?? 4780, host, () => {
       const port = (server.address() as AddressInfo).port;
-      resolvePromise({ port, url: `http://localhost:${port}`, close: () => server.close() });
+      const close = () => {
+        server.close();
+        session?.pp.dispose().catch(() => {});
+      };
+      resolvePromise({ port, url: `http://localhost:${port}`, close });
     });
   });
 }
@@ -797,10 +857,6 @@ function fileSafe(name: string): string {
 function publicEnv(env: BuildEnv) {
   const { path: _path, ...rest } = env;
   return { platform: process.platform, ...rest };
-}
-
-export function currentBuildEnv(): BuildEnv | undefined {
-  return buildEnv;
 }
 
 /** Command-line entry: `npm run app` / `node dist/app/server.js [--port n] [--host h]`. */
@@ -847,8 +903,7 @@ if (isMain) main();
  * so the compiled dist/ copy is what runs there.
  */
 function relaunchInWsl(port: number, host: string) {
-  const root = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
-  const wslRoot = spawnSync("wsl", ["-e", "wslpath", "-a", root.replace(/\\/g, "/")], {
+  const wslRoot = spawnSync("wsl", ["-e", "wslpath", "-a", ROOT.replace(/\\/g, "/")], {
     encoding: "utf8",
   });
   if (wslRoot.status !== 0) {

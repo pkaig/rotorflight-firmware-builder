@@ -60,7 +60,7 @@ export async function ensureSource(opts: SourceOptions): Promise<SourceInfo> {
     if (!(await exists(join(opts.sourceDir, ".git")))) {
       throw new BuildToolError(
         "CHECKOUT_FAILED",
-        `--source-dir ${opts.sourceDir} is not a git working tree.`,
+        `${opts.sourceDir} is not a git working tree.`,
       );
     }
     if (!opts.asIs) await checkout(opts.sourceDir, ref, opts.onEvent);
@@ -71,16 +71,32 @@ export async function ensureSource(opts: SourceOptions): Promise<SourceInfo> {
   if (opts.fresh && (await exists(dir))) await rm(dir, { recursive: true, force: true });
 
   if (await exists(join(dir, ".git"))) {
-    // Cached: make sure it is actually at `ref` (a moving branch may have advanced).
+    // A tag never moves: the cached checkout is it, and no network is needed.
+    if (await isTag(dir, ref)) return describe(dir, ref);
+    // A branch may have advanced: fetch it. Offline, keep building the cached copy
+    // rather than deleting it (a re-clone would fail too).
+    let fetched = false;
     try {
-      await exec("git", ["-C", dir, "fetch", "--depth", "1", "origin", ref], {
-        onEvent: opts.onEvent,
-      });
-      await checkout(dir, "FETCH_HEAD", opts.onEvent);
-      return describe(dir, ref);
+      await exec("git", ["-C", dir, "fetch", "--depth", "1", "origin", ref], { onEvent: opts.onEvent });
+      fetched = true;
     } catch {
-      await rm(dir, { recursive: true, force: true });
+      opts.onEvent?.({ stream: "stderr", line: `Could not update ${ref} (offline?); using the cached checkout.` });
     }
+    if (!fetched) {
+      try {
+        return await describe(dir, ref);
+      } catch {
+        // The cache is broken as well: fall through to a fresh clone.
+      }
+    } else {
+      try {
+        await checkout(dir, "FETCH_HEAD", opts.onEvent);
+        return await describe(dir, ref);
+      } catch {
+        // A damaged checkout: start again from a fresh clone.
+      }
+    }
+    await rm(dir, { recursive: true, force: true });
   }
 
   await mkdir(sourcesDir(), { recursive: true });
@@ -114,6 +130,15 @@ async function checkout(dir: string, ref: string, onEvent?: (e: ExecEvent) => vo
   } catch (err) {
     const detail = err instanceof BuildToolError ? err.detail ?? "" : String(err);
     throw new BuildToolError("CHECKOUT_FAILED", `Could not check out "${ref}".`, detail);
+  }
+}
+
+/** Is `ref` a tag in this checkout? (`clone --branch <tag>` keeps the tag ref.) */
+async function isTag(dir: string, ref: string): Promise<boolean> {
+  try {
+    return (await execCapture("git", ["-C", dir, "tag", "--list", ref])) === ref;
+  } catch {
+    return false;
   }
 }
 

@@ -3,7 +3,7 @@ import { join, relative } from "node:path";
 import { execCapture } from "./exec.ts";
 
 /**
- * Flash/RAM accounting for the sample app.
+ * Flash/RAM accounting for the flash budget.
  *
  * - Capacity and usage come from the linker itself: the firmware links with
  *   `--print-memory-usage`, so every build log carries a per-region table.

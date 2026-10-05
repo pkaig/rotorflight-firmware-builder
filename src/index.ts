@@ -1,8 +1,7 @@
 /**
- * Public API for the headless build module.
- *
- * Phase 2 (Tauri/NW.js integration) is meant to be a thin adapter over this
- * single function — no logic should move into the shell layer.
+ * Public API for the headless build module: buildFirmware() plus the probe,
+ * source and toolchain helpers. The CLI (cli.ts) and the app server
+ * (app/server.ts, also run inside the desktop app) are thin layers over it.
  */
 
 import { DEFAULT_OUTPUT_DIR } from "./config.ts";

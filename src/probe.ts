@@ -1,6 +1,7 @@
-import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { availableParallelism, tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { BuildToolError } from "./errors.ts";
 import { exec } from "./exec.ts";
 
@@ -20,15 +21,17 @@ import { exec } from "./exec.ts";
  */
 
 /**
- * Convention for turning a baseline feature OFF. -D can only add a define, so a
- * feature is removable only when the firmware headers guard it, e.g.
+ * Guard conventions. -D can only add a define, so a baseline feature is
+ * removable only when the firmware headers guard it, in either style:
  *
- *   #ifndef DISABLE_USE_LED_STRIP
- *   #define USE_LED_STRIP
- *   #endif
+ *   #ifndef DISABLE_USE_LED_STRIP        #if defined(DISABLE_GPS)
+ *   #define USE_LED_STRIP                #undef USE_GPS
+ *   #endif                               #endif
  *
- * and the build passes `-DDISABLE_USE_LED_STRIP`. Rotorflight 4.6 has no such
- * guards, so every baseline feature probes as locked until the firmware adds them.
+ * and the build passes the flag (-DDISABLE_USE_LED_STRIP, -DDISABLE_GPS). The
+ * reverse, an opt-in, is an ENABLE_ guard around a feature that is otherwise
+ * removed: `#if !defined(ENABLE_CMS) ... #undef USE_CMS`. Stock Rotorflight 4.6
+ * has no such guards, so there every baseline feature probes as locked.
  */
 export const DISABLE_PREFIX = "DISABLE_";
 export const disableFlag = (use: string) => `${DISABLE_PREFIX}${use}`;
@@ -123,6 +126,36 @@ export interface PreviewResult {
   options: string[];
 }
 
+/** Scratch files live in the OS temp folder, never in the firmware tree. */
+const TEMP_PREFIX = "rfb-";
+const STUB_NAME = "probe.c";
+const MK_NAME = "probe.mk";
+const STUB_TEXT = '#include "platform.h"\n';
+
+/**
+ * Remove scratch folders that earlier runs left behind (a crash, or versions
+ * before dispose() existed). Only folders holding nothing but our own scratch
+ * files and older than a day. An instance that has been running longer than
+ * that simply recreates its stub on the next preview (see run()).
+ */
+export async function sweepProbeTemp(maxAgeMs = 24 * 3600 * 1000): Promise<number> {
+  let removed = 0;
+  for (const name of await readdir(tmpdir())) {
+    if (!name.startsWith(TEMP_PREFIX)) continue;
+    const dir = join(tmpdir(), name);
+    try {
+      const files = await readdir(dir);
+      if (!files.every((f) => f === STUB_NAME || f === MK_NAME)) continue;
+      if (Date.now() - (await stat(dir)).mtimeMs < maxAgeMs) continue;
+      await rm(dir, { recursive: true, force: true });
+      removed++;
+    } catch {
+      // Not a folder, or in use: leave it.
+    }
+  }
+  return removed;
+}
+
 /** Null device for the compiler's output (gcc on Windows has no /dev/null). */
 const NULL_DEVICE = process.platform === "win32" ? "NUL" : "/dev/null";
 const USE_TOKEN = /\bUSE_[A-Z0-9_]+\b/g;
@@ -144,10 +177,15 @@ export class TargetPreprocessor {
   static async create(ctx: ProbeContext): Promise<TargetPreprocessor> {
     const cflags = await targetCflags(ctx);
     // platform.h is found through the target's -I paths, so the stub can live anywhere.
-    const stub = join(await mkdtemp(join(tmpdir(), "rfb-")), "probe.c");
-    await writeFile(stub, '#include "platform.h"\n');
+    const stub = join(await mkdtemp(join(tmpdir(), TEMP_PREFIX)), STUB_NAME);
+    await writeFile(stub, STUB_TEXT);
     const gcc = join(ctx.binDir, process.platform === "win32" ? "arm-none-eabi-gcc.exe" : "arm-none-eabi-gcc");
     return new TargetPreprocessor(ctx.sourceDir, `${shellQuote(posixPath(gcc))} -E ${cflags}`, stub);
+  }
+
+  /** Remove the stub's temp folder. Safe to call more than once. */
+  async dispose(): Promise<void> {
+    await rm(dirname(this.stub), { recursive: true, force: true });
   }
 
   /** Diagnostics-only pass: returns the error lines (empty when clean). */
@@ -179,7 +217,12 @@ export class TargetPreprocessor {
     return [...flags.map((f) => `-D${f}`), shellQuote(posixPath(this.stub))].join(" ");
   }
 
-  private run(args: string) {
+  private async run(args: string) {
+    // A temp cleaner (or dispose() during a reload) may have removed the stub.
+    if (!existsSync(this.stub)) {
+      await mkdir(dirname(this.stub), { recursive: true });
+      await writeFile(this.stub, STUB_TEXT);
+    }
     // Through sh, exactly as make itself invokes the compiler, so CFLAGS quoting
     // (e.g. -D'__FORKNAME__="rotorflight"') is interpreted identically.
     return exec("sh", ["-c", `${this.command} ${args}`], {
@@ -189,13 +232,30 @@ export class TargetPreprocessor {
   }
 }
 
-/** Classify every USE_ define the source tests, for one target. */
+/**
+ * Classify every USE_ define the source tests, for one target. Pass `shared`
+ * to reuse a preprocessor the caller keeps (and disposes); otherwise one is
+ * created and removed here.
+ */
 export async function probeOptions(
+  ctx: ProbeContext,
+  onProgress?: (done: number, total: number) => void,
+  shared?: TargetPreprocessor,
+): Promise<ProbeResult> {
+  const pp = shared ?? (await TargetPreprocessor.create(ctx));
+  try {
+    return await probeWith(pp, ctx, onProgress);
+  } finally {
+    if (!shared) await pp.dispose();
+  }
+}
+
+async function probeWith(
+  pp: TargetPreprocessor,
   ctx: ProbeContext,
   onProgress?: (done: number, total: number) => void,
 ): Promise<ProbeResult> {
   const start = Date.now();
-  const pp = await TargetPreprocessor.create(ctx);
 
   const baselineErrors = await pp.diagnose([]);
   if (baselineErrors.length) {
@@ -400,15 +460,20 @@ export function guardMap(probe: Pick<ProbeResult, "options">): Record<string, st
 
 /** Get the exact CFLAGS the firmware Makefile would compile this target with. */
 async function targetCflags(ctx: ProbeContext): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "rfb-"));
-  const mk = join(dir, "probe.mk");
-  await writeFile(mk, "rfb-print-cflags:\n\t$(info RFB_CFLAGS=$(CFLAGS))\n\t@:\n");
-  const vars = Object.entries(ctx.extraMakeVars ?? {}).map(([k, v]) => `${k}=${v}`);
-  const r = await exec(
-    "make",
-    ["-f", "Makefile", "-f", mk, `TARGET=${ctx.target}`, ...vars, "rfb-print-cflags"],
-    { cwd: ctx.sourceDir },
-  );
+  const dir = await mkdtemp(join(tmpdir(), TEMP_PREFIX));
+  const mk = join(dir, MK_NAME);
+  let r;
+  try {
+    await writeFile(mk, "rfb-print-cflags:\n\t$(info RFB_CFLAGS=$(CFLAGS))\n\t@:\n");
+    const vars = Object.entries(ctx.extraMakeVars ?? {}).map(([k, v]) => `${k}=${v}`);
+    r = await exec(
+      "make",
+      ["-f", "Makefile", "-f", mk, `TARGET=${ctx.target}`, ...vars, "rfb-print-cflags"],
+      { cwd: ctx.sourceDir },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
   const line = r.stdout.split(/\r?\n/).find((l) => l.startsWith("RFB_CFLAGS="));
   if (!line) {
     throw new BuildToolError("BUILD_FAILED", "Could not read CFLAGS from the firmware Makefile.", r.stdout);

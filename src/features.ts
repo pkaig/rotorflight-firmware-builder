@@ -35,7 +35,7 @@ export const FEATURE_DEFINES: Readonly<Record<string, readonly string[]>> = {
 
 export const KNOWN_FEATURES = Object.keys(FEATURE_DEFINES).sort();
 
-/** A define to add (`USE_X`) or a guard flag that removes one (`DISABLE_X`, see probe.ts). */
+/** A define to add (`USE_X`), or a guard flag (`DISABLE_X` removes one, `ENABLE_X` opts one in; see probe.ts). */
 const USE_TOKEN = /^(USE|DISABLE|ENABLE)_[A-Z0-9_]+$/;
 
 export interface ResolveResult {

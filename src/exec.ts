@@ -104,7 +104,7 @@ function wrapSpawnError(command: string, err: unknown): BuildToolError {
   if (isEnoent && command === "make")
     return new BuildToolError(
       "MAKE_NOT_FOUND",
-      "`make` was not found on PATH. On Windows the firmware build needs a POSIX environment (WSL, MSYS2 or the repo's Docker image).",
+      "`make` was not found on PATH. On Windows install GNU make (`winget install ezwinports.make`) and Git for Windows; the app offers to do this (Load build environment).",
     );
   return new BuildToolError(
     "BUILD_FAILED",

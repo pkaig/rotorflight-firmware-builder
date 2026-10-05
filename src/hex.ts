@@ -3,7 +3,7 @@ import { BuildToolError } from "./errors.ts";
 /**
  * Intel HEX parsing and board-config insertion, mirroring what the Rotorflight
  * Configurator's flasher does (src/js/workers/hex_parser.js and
- * src/js/ConfigInserter.js), so a firmware flashed from the sample app is
+ * src/js/ConfigInserter.js), so a firmware flashed from this app is
  * byte-identical to one flashed through the Configurator.
  */
 

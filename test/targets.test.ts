@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validTargetsFromSource } from "../src/targets.ts";
@@ -34,8 +34,10 @@ async function fixture(): Promise<string> {
   return root;
 }
 
-test("derives alt targets and drops the NOBUILD base", async () => {
-  const targets = await validTargetsFromSource(await fixture());
+test("derives alt targets and drops the NOBUILD base", async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const targets = await validTargetsFromSource(root);
   assert.deepEqual(targets, ["MATEKF405", "SITL", "STM32F405", "STM32H743"]);
   assert.ok(!targets.includes("STM32_UNIFIED"));
 });

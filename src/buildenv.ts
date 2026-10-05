@@ -48,11 +48,6 @@ export async function detectBuildEnv(force = false): Promise<BuildEnv> {
   return cached;
 }
 
-/** Environment for child processes, with the build PATH in place. */
-export function buildProcessEnv(env: BuildEnv, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...base, PATH: env.path, Path: env.path };
-}
-
 async function detectPosix(): Promise<BuildEnv> {
   const path = process.env.PATH ?? "";
   const problems: string[] = [];

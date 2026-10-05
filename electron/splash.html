@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; font-src 'self'; style-src 'unsafe-inline'">
+<title>Rotorflight Firmware Builder</title>
+<style>
+  /* Shown the moment the app starts, while the server and main window load. Same dark chrome as the app. */
+  @font-face { font-family: "Open Sans"; font-weight: 300 800; src: url("../app/assets/fonts/open-sans-latin.woff2") format("woff2"); }
+  :root {
+    --bg: hsl(208, 11%, 9%);
+    --border: hsl(208, 9%, 16%);
+    --text: hsl(208, 9%, 96%);
+    --muted: hsl(208, 9%, 70%);
+    --accent: hsl(203, 82%, 58%);
+  }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: var(--bg); color: var(--text); box-sizing: border-box; border: 1px solid var(--border);
+    font: 13px "Open Sans", "Segoe UI", sans-serif; user-select: none; cursor: default;
+    -webkit-app-region: drag; /* frameless: drag the splash to move it */
+  }
+  img { width: 260px; height: auto; }
+  .name { font-size: 15px; font-weight: 600; letter-spacing: .02em; margin-top: -4px; }
+  .status { display: flex; align-items: center; gap: 9px; color: var(--muted); }
+  .spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border);
+             border-top-color: var(--accent); animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+</style>
+</head>
+<body>
+  <img src="../app/assets/rotorflight-logo.svg" alt="Rotorflight">
+  <div class="name">Firmware Builder</div>
+  <div class="status" role="status"><span class="spinner" aria-hidden="true"></span>Starting…</div>
+</body>
+</html>

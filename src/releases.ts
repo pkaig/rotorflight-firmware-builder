@@ -50,9 +50,15 @@ export async function releaseHexSize(tag: string, target: string): Promise<Relea
   let text: string | undefined;
   let asset = "";
   let url = "";
+  // The asset's real name and URL are kept beside the cached hex.
+  const meta = `${file}.json`;
   if (existsSync(file)) {
     text = await readFile(file, "utf8");
-    asset = file.split(/[\\/]/).pop()!;
+    try {
+      ({ asset, url } = JSON.parse(await readFile(meta, "utf8")) as { asset: string; url: string });
+    } catch {
+      asset = file.split(/[\\/]/).pop()!; // cached before the metadata was kept
+    }
   } else {
     const res = await fetch(`https://api.github.com/repos/rotorflight/rotorflight-firmware/releases/tags/${tag}`, {
       headers: { accept: "application/vnd.github+json" },
@@ -69,6 +75,7 @@ export async function releaseHexSize(tag: string, target: string): Promise<Relea
     text = await hex.text();
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, text);
+    await writeFile(meta, JSON.stringify({ asset, url }));
   }
   const img = parseHex(text);
   const marker = img.blocks

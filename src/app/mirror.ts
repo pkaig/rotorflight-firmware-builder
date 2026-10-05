@@ -42,8 +42,6 @@ export async function syncMirror(source: string): Promise<MirrorResult> {
   const r = await exec("rsync", [
     "-a", "--delete", "--itemize-changes",
     "--exclude=/.git", "--exclude=/obj", "--exclude=/tools", "--exclude=/downloads",
-    // our own probe stub and build stamp live in the mirror; keep them
-    "--exclude=/.rfb-*",
     `${source.replace(/\/+$/, "")}/`, `${dir}/`,
   ]);
   const changed = r.stdout

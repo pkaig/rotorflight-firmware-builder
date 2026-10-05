@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { buildFirmware } from "./index.ts";
-import { KNOWN_FEATURES, FEATURE_DEFINES } from "./features.ts";
-import { splitList } from "./features.ts";
+import { FEATURE_DEFINES, KNOWN_FEATURES, splitList } from "./features.ts";
+import { cachedSourcePath } from "./source.ts";
 import { KNOWN_UNIFIED_TARGETS, validTargetsFromSource } from "./targets.ts";
 import { isBuildToolError } from "./errors.ts";
 
-const USAGE = `rf-buildtool — local Rotorflight firmware build (Phase 1, CLI only)
+const USAGE = `rf-buildtool — local Rotorflight firmware build (command line)
 
 Usage:
   rf-buildtool build --target <MCU> --tag <ref> [--features <list>] [--options <list>]
   rf-buildtool features
-  rf-buildtool targets [--tag <ref>]
+  rf-buildtool targets [--tag <ref> | --source-dir <dir>]
 
 Options:
   --target <MCU>      Target board, e.g. STM32F405 (see 'rf-buildtool targets')
@@ -66,9 +66,10 @@ async function main(argv: string[]): Promise<number> {
   }
 
   if (command === "targets") {
-    const list = values["source-dir"]
-      ? await validTargetsFromSource(values["source-dir"])
-      : KNOWN_UNIFIED_TARGETS;
+    // From a local tree, or a ref's cached checkout; else the built-in list
+    // (validTargetsFromSource falls back to it when the tree is absent).
+    const dir = values["source-dir"] ?? (values.tag ? cachedSourcePath(values.tag) : undefined);
+    const list = dir ? await validTargetsFromSource(dir) : KNOWN_UNIFIED_TARGETS;
     for (const t of list) process.stdout.write(`${t}\n`);
     return 0;
   }
@@ -80,6 +81,12 @@ async function main(argv: string[]): Promise<number> {
 
   if (!values.target || !values.tag) {
     process.stderr.write("error: --target and --tag are required\n\n" + USAGE);
+    return 2;
+  }
+
+  const jobs = values.jobs === undefined ? undefined : Number(values.jobs);
+  if (jobs !== undefined && !(Number.isInteger(jobs) && jobs > 0)) {
+    process.stderr.write(`error: --jobs must be a positive whole number, got "${values.jobs}"\n`);
     return 2;
   }
 
@@ -104,7 +111,7 @@ async function main(argv: string[]): Promise<number> {
     fresh: values.fresh,
     incremental: values.incremental,
     extraMakeVars,
-    jobs: values.jobs ? Number(values.jobs) : undefined,
+    jobs,
     onEvent: values.quiet
       ? undefined
       : (e) => process.stderr.write(`  ${e.line}\n`),

@@ -4,10 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rotorflight Firmware Builder</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="preload" href="/assets/fonts/open-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+  /* Fonts ship with the app (variable fonts, Latin subset; SIL OFL, see
+     assets/fonts/LICENSE.md). Fetching them from Google Fonts blocked the first
+     paint on the network at every start, and failed offline. */
+  @font-face { font-family: "Open Sans"; font-style: normal; font-weight: 300 800; font-display: swap;
+               src: url("/assets/fonts/open-sans-latin.woff2") format("woff2"); }
+  @font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 100 800; font-display: swap;
+               src: url("/assets/fonts/jetbrains-mono-latin.woff2") format("woff2"); }
+
   /* Theme: the Rotorflight Configurator's Svelte design tokens (src/css/app.css,
      src/css/main.css), so this app reads as part of the same suite. Dark is the
      default; html[data-theme="light"] switches to the Configurator's light set. */
@@ -618,7 +624,7 @@ const STATE_LABEL = {
   "off-addable": ["addable", "addable"],
   "off-locked": ["unavailable", ""],
 };
-let session = null, busy = null, history = [];
+let session = null, busy = null, builds = [];
 // Default view: Changes. The last filter used is remembered per viewer.
 let filter = (() => { try { return ["changes", "on", "all"].includes(localStorage.getItem("rfb.filter")) ? localStorage.getItem("rfb.filter") : "changes"; } catch { return "changes"; } })(), query = "";
 const add = new Set(), remove = new Set();
@@ -963,8 +969,6 @@ $("setupSummary").addEventListener("click", async (e) => {
 });
 
 // --- option details card ------------------------------------------------------------
-
-
 function openCard(row) {
   cardOpen = true;
   cardAnchor = row;
@@ -1019,11 +1023,11 @@ function selectOption(name) {
 function measuredDelta(o) {
   // A build that differs from the baseline by just this option (plus what it requires).
   const solo = new Set([o.name, ...(o.requires || [])]);
-  const local = history.find((h) => h.ok && !h.options.length && h.target === session.target && h.commit === session.commit);
+  const local = builds.find((h) => h.ok && !h.options.length && h.target === session.target && h.commit === session.commit);
   const sbl = session.sizes?.baseline;
   const base = local ?? (sbl && sbl.source !== "nearest" ? { flash: sbl.flash } : null);
   if (!base) return null;
-  for (const h of history.slice().reverse()) {
+  for (const h of builds.slice().reverse()) {
     if (!h.ok || h.target !== session.target || h.commit !== session.commit) continue;
     const byGuard = new Map(session.probe.options.filter((x) => x.guard).map((x) => [x.guard, x.name]));
     const names = h.options.map((x) => byGuard.get(x) ?? x);
@@ -1142,7 +1146,7 @@ function renderBudget() {
 
   // Builds of exactly this selection (or of the baseline) at this commit.
   const want = changed ? (lastPreview?.options ?? null) : [];
-  const mine = history.filter((h) => h.ok && h.target === session.target && h.commit === session.commit);
+  const mine = builds.filter((h) => h.ok && h.target === session.target && h.commit === session.commit);
   const built = want && [...mine].reverse().find((h) => h.options.length === want.length && h.options.every((o) => want.includes(o)));
   const lastOther = !built && mine.length ? mine[mine.length - 1] : null;
 
@@ -1196,7 +1200,7 @@ function renderBudget() {
     `<div class="legend"><span><i class="sw-est ${front > cap ? "over" : ""}"></i>${frontLabel} ${frontLabel === "baseline" ? approx : est && !built ? "≤ " : ""}${B(front)}</span>` +
     (showBase ? `<span><i class="sw-fill"></i>baseline ${approx}${B(b.flash)}</span>` : "") +
     (cap ? `<span><i class="sw-free"></i>free ${B(Math.max(0, cap - front))}</span>` : "") + `</div>`;
-  if (est && !built) notes.unshift(`Estimate counts code inside each removed feature's <code>#ifdef</code> blocks, so real savings are larger (GPS: estimated 13.8 KB, measured 26.4 KB).` +
+  if (est && !built) notes.unshift(`Estimate counts code inside each removed feature's <code>#ifdef</code> blocks, so real savings are larger: code that only those features call is not counted.` +
     (addedCount ? ` Added options are not estimated; build to measure them.` : "") +
     (z.located ? ` ${(100 * z.located).toFixed(0)}% of the baseline could be traced to source.` : ""));
   if (changed && !built) notes.push(`Build this selection to see its exact size here.`);
@@ -1220,13 +1224,13 @@ $("budgetBody").addEventListener("click", async (e) => {
 
 // --- history ------------------------------------------------------------------
 function renderHistory() {
-  $("buildsCount").textContent = history.length ? `(${history.length})` : "";
-  if (!history.length) {
+  $("buildsCount").textContent = builds.length ? `(${builds.length})` : "";
+  if (!builds.length) {
     $("history").innerHTML = `<span class="muted">None yet. Build the baseline first so later builds show a size delta.</span>`;
     return;
   }
-  const rows = history.map((h, i) => [h, i]).reverse().map(([h, i]) => {
-    const base = history.find((b) => b.ok && !b.options.length && b.target === h.target && b.commit === h.commit);
+  const rows = builds.map((h, i) => [h, i]).reverse().map(([h, i]) => {
+    const base = builds.find((b) => b.ok && !b.options.length && b.target === h.target && b.commit === h.commit);
     const sb = session?.sizes?.baseline;
     const baseFlash = base ? base.flash : sb && sb.source !== "nearest" && session.target === h.target && session.commit === h.commit ? sb.flash : null;
     const delta = h.ok && baseFlash !== null && h !== base ? h.flash - baseFlash : null;
@@ -1241,7 +1245,7 @@ function renderHistory() {
       `</td></tr>`;
   });
   $("history").innerHTML = `<table><tr><th>When</th><th>Options</th><th>Flash</th></tr>${rows.join("")}</table>` +
-    `<div class="budget-note">Or flash it with the Configurator: in its's Firmware Flasher, pick your board first, then ` +
+    `<div class="budget-note">Or flash it with the Configurator: in its Firmware Flasher, pick your board first, then ` +
     `<b>Load Firmware [Local]</b> with the downloaded .hex. It adds the board config before flashing.</div>`;
 }
 
@@ -1279,10 +1283,6 @@ $("build").addEventListener("click", async () => {
 const es = new EventSource("/api/events");
 es.addEventListener("log", (e) => { const d = JSON.parse(e.data); appendLog(d.line, d.stream); });
 es.addEventListener("busy", (e) => setBusy(JSON.parse(e.data).busy));
-es.addEventListener("progress", (e) => {
-  const d = JSON.parse(e.data);
-  // progress now arrives as part of the job banner
-});
 function applySession(next) {
   const prev = session;
   session = next;
@@ -1315,7 +1315,7 @@ es.addEventListener("open", async () => {
   disconnected = false;
   try {
     const s = await api("/api/state");
-    history = s.history; renderHistory();
+    builds = s.history; renderHistory();
     setBusy(s.busy);
     renderJob(s.job);
     applySession(s.session);
@@ -1323,7 +1323,7 @@ es.addEventListener("open", async () => {
   } catch {}
 });
 es.addEventListener("job", (e) => renderJob(JSON.parse(e.data)));
-es.addEventListener("history", (e) => { history = JSON.parse(e.data); renderHistory(); renderCard(); renderBudget(); onHistoryForFlash(); });
+es.addEventListener("history", (e) => { builds = JSON.parse(e.data); renderHistory(); renderCard(); renderBudget(); onHistoryForFlash(); });
 
 // --- targets: from the ref's checkout when it is on disk ---------------------------
 let targetList = [];
@@ -1583,7 +1583,7 @@ $("dirUse").addEventListener("click", () => {
 });
 
 // --- build & flash -------------------------------------------------------------------
-let flashAfter = null; // history length when a "Build & flash" started
+let flashAt = null; // the build (its `at`) a "Build & flash" is waiting for
 let flashImage = null;
 let flashing = false;
 
@@ -1598,16 +1598,19 @@ $("buildFlash").addEventListener("click", async () => {
     appendLog("This browser has no WebUSB, so it cannot flash. Use Edge or Chrome.", "error");
     return;
   }
-  flashAfter = history.length;
-  try { await api("/api/build", { add: [...add], remove: [...remove], name: $("buildName").value }); $("buildName").value = ""; }
-  catch (err) { flashAfter = null; appendLog(err.message, "error"); }
+  try {
+    const r = await api("/api/build", { add: [...add], remove: [...remove], name: $("buildName").value });
+    $("buildName").value = "";
+    flashAt = r.at;
+    onHistoryForFlash(); // in case it already finished
+  } catch (err) { appendLog(err.message, "error"); }
 });
 
 function onHistoryForFlash() {
-  if (flashAfter === null || history.length <= flashAfter) return;
-  const i = history.length - 1;
-  flashAfter = null;
-  if (history[i].ok) openFlash(i);
+  const i = flashAt ? builds.findIndex((h) => h.at === flashAt) : -1;
+  if (i < 0) return;
+  flashAt = null;
+  if (builds[i].ok) openFlash(i);
   else appendLog("Build failed, so nothing was flashed.", "error");
 }
 
@@ -1788,7 +1791,7 @@ $("flashClose").addEventListener("click", () => { if (!flashing) $("flashDialog"
 $("flashDialog").addEventListener("cancel", (e) => { if (flashing) e.preventDefault(); });
 function startRename(el) {
   const at = el.dataset.rename;
-  const h = history.find((x) => x.at === at);
+  const h = builds.find((x) => x.at === at);
   if (!h) return;
   const input = document.createElement("input");
   input.type = "text";
@@ -1827,7 +1830,7 @@ $("history").addEventListener("click", async (e) => {
   const del = e.target.closest("[data-delete]");
   if (del) {
     e.preventDefault();
-    const h = history.find((x) => x.at === del.dataset.delete);
+    const h = builds.find((x) => x.at === del.dataset.delete);
     if (!h) return;
     const what = h.options.length ? h.options.join(" ") : "the baseline build";
     const extra = !h.options.length && h.ok
@@ -2012,7 +2015,7 @@ if (window.rfbDesktop) {
 api("/api/state").then(async (s) => {
   renderJob(s.job);
   for (const l of s.log || []) appendLog(l.line, l.stream);
-  history = s.history; renderHistory();
+  builds = s.history; renderHistory();
   setBusy(s.busy);
   if (s.session) {
     session = s.session; initFeatures(); restoreSelection(); renderSummary(); renderList(); renderBudget(); runPreview();

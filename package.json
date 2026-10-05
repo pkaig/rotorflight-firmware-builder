@@ -25,7 +25,8 @@
     "test": "node --test",
     "app": "tsc -p tsconfig.build.json && node dist/app/server.js",
     "desktop": "tsc -p tsconfig.build.json && electron .",
-    "dist:win": "tsc -p tsconfig.build.json && electron-builder --win",
+    "splash": "electron build/make-splash.mjs",
+    "dist:win": "tsc -p tsconfig.build.json && electron build/make-splash.mjs && electron-builder --win",
     "dist:dir": "tsc -p tsconfig.build.json && electron-builder --dir"
   },
   "devDependencies": {
@@ -65,7 +66,8 @@
       "perMachine": false
     },
     "portable": {
-      "artifactName": "${productName}-${version}-portable.${ext}"
+      "artifactName": "${productName}-${version}-portable.${ext}",
+      "splashImage": "build/portable-splash.bmp"
     }
   },
   "author": "Phil Kaighin (PDK)"

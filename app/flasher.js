@@ -1,4 +1,4 @@
-// Browser-side board access for the sample app: MSP over Web Serial (detect,
+// Browser-side board access for the app page: MSP over Web Serial (detect,
 // reboot to bootloader) and STM32 DfuSe flashing over WebUSB. The DFU sequence
 // mirrors the Rotorflight Configurator's (src/js/protocols/stm32usbdfu.js):
 // erase only the touched sectors, write, read back and compare, then leave DFU.

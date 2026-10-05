@@ -1,137 +1,91 @@
-# rotorflight-firmware-builder
+# Rotorflight Firmware Builder
 
-Headless local firmware build module for the Rotorflight Configurator.
+Build custom Rotorflight firmware on your own PC, with only the features your
+model uses, then flash it to the flight controller.
 
-Betaflight solves the MCU flash/RAM squeeze with a hosted cloud build service that
-strips unused code paths via existing `USE_XXX` compile-time defines. This project
-does the same thing **locally**, on the user's own machine, so no build server has
+Betaflight solves the MCU flash/RAM squeeze with a hosted cloud build service
+that strips unused code paths via the firmware's `USE_XXX` compile-time
+defines. This project does the same thing **locally**, so no build server has
 to be hosted or maintained.
 
-**Phase 1 (this module): CLI only, no UI.** A later phase wraps `buildFirmware()`
-as a thin adapter inside the Configurator (NW.js / Node) and streams progress to a
-tab. See the project scope document for the full plan.
+It comes as:
 
-## Requirements
+- a **desktop app** (Windows installer or portable `.exe`, built with Electron),
+- the same app as a **local web page** (`npm run app`, for Edge or Chrome),
+- a **command-line tool** (`rf-buildtool`) and a Node module (`buildFirmware()`).
 
-- Node.js >= 22 (runs TypeScript sources directly via type stripping)
-- `git` on PATH (anonymous HTTPS clone — no GitHub account needed)
-- A POSIX build environment for the firmware `make`:
-  - Linux / macOS: native
-  - **Windows: WSL, MSYS2, or the firmware repo's Docker image** — the firmware
-    Makefile does not build under plain `cmd.exe`/PowerShell
-- ~1 GB free disk per cached firmware ref (source + ARM toolchain)
+## Desktop app
 
-The ARM toolchain (`arm-none-eabi-gcc`, pinned by the firmware's
-`GCC_REQUIRED_VERSION`) is installed automatically on first build. The archive
-is downloaded from `developer.arm.com` by this tool, with retries and resume,
-and checked against a pinned SHA-256 (`src/download.ts`). The firmware's own
-`make arm_sdk_install` then only unpacks it; on its own it downloads with
-`curl -k` and verifies nothing.
+### Install
 
-## Usage
+Run `Rotorflight Firmware Builder Setup <version>.exe`, or use the portable
+`.exe`, which needs no install. Both are unsigned for now, so Windows
+SmartScreen may warn: choose **More info → Run anyway**.
 
-```sh
-npm install
-npm run build            # emit dist/ (for packaging / the bin)
+### First run
 
-# or run straight from source:
-npm run cli -- build --target STM32F405 --tag release/4.6.0 --features GPS,LED_STRIP,BLACKBOX
+The firmware build needs a few free tools. If any are missing, the app offers to
+**Load build environment**: click OK and it installs them with winget, Windows'
+package manager:
 
-npm run cli -- features           # list friendly feature -> USE_ define mappings
-npm run cli -- targets            # list target MCUs
-npm run cli -- build --help
-```
+- **Git for Windows**, whose signed Unix tools (sh, sed, find, …) run the
+  firmware Makefile;
+- **GNU make** (`ezwinports.make`).
 
-Artifacts (`.hex`, `.bin`, `.elf`) are copied into `./output` (override with
-`--out`). `--json` prints a machine-readable result including the size report.
+The ARM compiler (about 180 MB) downloads automatically the first time you load
+a firmware. Its SHA-256 is checked against a pinned value before it is
+installed. Nothing unsigned is bundled with the app.
 
-### Build from a local firmware clone
+Finished builds go to `Documents\Rotorflight Firmware Builder` (**File → Open
+builds folder**).
 
-```sh
-npm run cli -- build --target STM32F7X2 --tag release/4.6.0 \
-  --source-dir ../rotorflight-firmware --features RPM_FILTER
-```
+### Using it
 
-## Sample app (option toggles)
+1. **Detect board** reads the connected flight controller over USB, as the
+   Configurator's Detect does, and selects its MCU target. Or pick the board
+   from the list (the Configurator's `rotorflight-targets`). A board that is
+   already plugged in and permitted is detected automatically at start-up.
+2. Choose the **firmware source**: a Rotorflight release from GitHub (tick
+   *RCs & snapshots* for more), or a **local directory**, such as your own clone
+   with firmware-side changes. A local tree is built exactly as it is on disk.
+3. **Load firmware**. The first load of a release fetches its source and the
+   toolchain, which takes a few minutes. The app then probes every `USE_`
+   option for the target with the real preprocessor. A banner shows each step.
+4. In **Your setup**, untick what the model does not use (GPS, LED strip, OSD,
+   telemetry protocols and so on). Options that only those features need are
+   marked *not needed* and switched off. Ticking a feature with an opt-in
+   (`ENABLE_`) guard switches its option on.
+5. Review the **Options** list. *Changes* (the default) shows only what differs
+   from the stock firmware, including knock-on effects. *Baseline* shows what
+   the stock build contains, and *All* shows everything. The **i** button on an
+   option opens its details: what it is, when to keep or strip it, where it is
+   defined and used, and any measured size change.
+6. **Selection** shows the effective change after all headers. Name the build
+   if you like (e.g. *OMP M4*), then **Build**, or **Build & flash**.
 
-A throwaway proof-of-process UI: one toggle per `USE_XXX` option, then build.
-Zero dependencies — a `node:http` server plus one HTML page.
+The **Flash budget** compares the baseline, an estimate for the current
+selection, and the measured size once built. The **Log** shows 10 lines; click
+it for 20. **Builds** lists every build with its size change, a *.hex*
+download, a *flash* link, rename and delete.
 
-```sh
-npm run app        # compiles dist/, then serves http://localhost:4780
-```
+### Option states
 
-On Windows this hands itself off to WSL (where `make` works); WSL forwards
-localhost, so open the URL in the Windows browser. `--port <n>` picks another
-port; `RFB_NO_WSL=1` skips the handoff.
+| State | Meaning |
+|---|---|
+| removable | in the stock build, and the firmware has a removal guard for it |
+| baseline, locked | in the stock build with no guard: `-D` cannot remove it |
+| addable | not in the stock build; `-DUSE_X` or an `ENABLE_` flag adds it cleanly |
+| follows X | goes (or comes) automatically with X; needs no flag of its own |
+| unavailable | `-D` collides with a header define, is `#undef`'d again, or is another MCU's hardware |
 
-**Detect board** reads the connected flight controller over Web Serial with
-`MSP_BOARD_INFO`, as the Configurator's Detect does, and selects its MCU target.
-Use Edge or Chrome, and close the Configurator first so the port is free.
-Without a board, **pick a board** from the Configurator's list
-(`rotorflight/rotorflight-targets`, cached 2h). Each board maps to a target via
-its config header. The target dropdown lists the ref's real targets once its
-source is on disk.
+Platform plumbing (e.g. `USE_HAL_DRIVER`) and another MCU's hardware are locked
+even when the preprocessor would accept them. Feature groups and per-option
+context live in `data/option-info.json`.
 
-**Load & probe** finds the target's exact CFLAGS from the firmware Makefile, then
-runs `arm-none-eabi-gcc -E` over `platform.h` once per candidate define
-(`src/probe.ts`). Each option is classified as:
+### Firmware guards
 
-| State | Meaning | Toggle |
-|---|---|---|
-| removable | in the baseline, and guarded by `#ifndef DISABLE_USE_X` | live |
-| baseline, locked | in the baseline, no guard — `-D` cannot remove it | subdued |
-| addable | not in the baseline, `-DUSE_X` preprocesses cleanly | live |
-| unavailable | `-D` collides with a header define, is `#undef`'d again, or hits an `#error` | subdued |
-
-Changing toggles re-preprocesses the whole selection and shows the effective
-change, including knock-on `#undef`s from `common_post.h`. **Build** runs
-`buildFirmware()` and lists flash size against the baseline build.
-
-**Your setup** lists features (receiver protocol, DShot, ESC telemetry, LED
-strip, OSD and so on). Untick what the model does not use: options only those
-features need are marked *not needed*. **Apply** switches off the removable ones,
-and the locked ones are listed as the `#ifndef DISABLE_USE_X` guards the firmware
-would need. Feature groups and per-option context (what it is, why to keep or
-strip it, importance) live in `data/option-info.json`.
-
-Options that are not real choices are locked even when the preprocessor would
-accept them. That covers platform plumbing such as `USE_HAL_DRIVER`, which
-`make/mcu/*.mk` sets for F7/H7/G4, and another MCU's hardware such as `USE_UART7`
-on an F4. Click any option for a details card: where it is defined, which files
-use it, its dependencies and any measured size change.
-
-For an official release, the baseline comes straight from the `.hex` attached
-to the GitHub release, so no build is needed. That applies to a release source,
-or a local tree whose HEAD is exactly a release tag. The size is also shown next
-to the release picker. It matches a local build of the same tag exactly; the
-4-byte config-erase marker (a lone `0xFFFFFFFF` in `.flash_config`) is subtracted
-unless you build with `FLASH_CONFIG_ERASE`. For other local trees the release
-matching their declared `FC_VERSION`, or the newest one below it, is shown for
-reference, and a local baseline build measures the tree itself. Releases publish
-no ELF, so RAM use and savings estimates still need one local baseline build.
-Builds are kept in `history.json` in the cache directory and survive restarts.
-
-**Flash budget** shows the MCU's flash (`TARGET_FLASH_SIZE`). After one baseline
-build it also shows the linker's per-region usage (`--print-memory-usage`) and
-an estimate for the current selection. The estimate sums the baseline ELF's
-symbols (`nm -S`) that sit inside each removed feature's `#ifdef` blocks, so it
-is a lower bound. LED strip on F405: estimated 8.7 KB flash and 5.3 KB RAM,
-measured 11.1 KB and 5.5 KB. Baselines are kept in the cache directory
-(`baselines.json`), so they survive restarts.
-
-**Firmware source** is either a Rotorflight release (from GitHub; tick *RCs &
-snapshots* for more) or a **local directory** (*Open directory…* browses
-folders and accepts pasted Windows paths). Nothing loads until you press
-**Load firmware**. A banner shows what is loading, each step and the elapsed
-time. Local trees on a Windows drive are mirrored into WSL with rsync before
-each probe and build. Building on `/mnt/c` in place is impractically slow,
-because the firmware Makefile's `git diff --shortstat` re-hashes the whole tree
-over the drive bridge. The mirror reuses the clone's git directory and the
-cached Linux toolchain, and never writes to your folder. Edits are picked up on
-every Build; after adding guards, press Load firmware again to re-probe.
-
-Removal guards are recognised in either style, under any `DISABLE_*` name:
+`-D` can only add a define, so stripping a stock feature needs a guard in the
+firmware headers. Any `DISABLE_*` name works, in either style:
 
 ```c
 #ifndef DISABLE_USE_LED_STRIP        // around the #define
@@ -143,52 +97,133 @@ Removal guards are recognised in either style, under any `DISABLE_*` name:
 #endif
 ```
 
-**Build** compiles. **Build & flash** also flashes the result to the connected
-board over USB. The app reboots the board into its ROM DFU bootloader over the
-serial port granted by *Detect*, inserts the board config exactly as the
-Configurator does (byte-identical, see `src/hex.ts`), and refuses a board whose
-MCU differs from the build target. It then erases only the touched sectors, so
-the settings sector survives unless `FLASH_CONFIG_ERASE` was built in, writes,
-reads back to verify, and restarts the board. WebUSB needs Edge or Chrome, and on
-Windows the DFU device needs the WinUSB driver, as for the Configurator. Every
-build in the list also has *.hex* and *flash* links.
+An opt-in works the other way round: `#if !defined(ENABLE_CMS) … #undef USE_CMS`
+makes `USE_CMS` addable with `ENABLE_CMS`. Stock Rotorflight 4.6 has no such
+guards, so there every stock feature is locked. Your setup lists the guards that
+would make the unneeded ones removable. After adding guards to a local tree,
+press **Load firmware** again to re-probe. (Builds always use the tree's
+current code.)
 
-To try a firmware-side guard, edit a copy of the firmware tree and enter its
-path under *Local tree*. It is built as-is, without a checkout.
+### Sizes
+
+- For an official release, the baseline comes from the `.hex` published on
+  GitHub, so no build is needed. It matches a local build of the same tag
+  exactly; the 4-byte config-erase marker is subtracted unless you build with
+  `FLASH_CONFIG_ERASE`.
+- A local tree uses its last baseline build or, before that, the nearest
+  release as an approximation.
+- One local baseline build measures the tree itself and gives the linker's
+  per-region usage, RAM use and savings estimates. An estimate sums the
+  baseline ELF's symbols (`nm -S`) inside each removed feature's `#ifdef`
+  blocks, so it is a lower bound. For example, LED strip on F405 was estimated
+  at 8.7 KB flash and measured at 11.1 KB.
+
+Builds and baselines are kept in the cache directory (`history.json`,
+`baselines.json`) and survive restarts.
+
+### Flashing
+
+**Build & flash**, or *flash* on any build:
+
+1. reboots the board into its DFU bootloader over the serial port from Detect;
+2. inserts the board config exactly as the Configurator does (byte-identical,
+   see `src/hex.ts`), and refuses a board whose MCU differs from the build;
+3. erases only the sectors it writes, so settings survive unless the build has
+   `FLASH_CONFIG_ERASE`;
+4. writes, reads everything back to verify, and restarts the board.
+
+A board already in DFU mode (hold BOOT while plugging in) is flashed directly.
+On Windows the DFU device needs the WinUSB driver, as for the Configurator
+(ImpulseRC Driver Fixer or Zadig). You can also load the downloaded `.hex` into
+the Configurator's Firmware Flasher with **Load Firmware [Local]**.
+
+## Running from source
+
+Requires Node.js 22 or newer (TypeScript runs directly via type stripping).
+
+```sh
+npm install
+npm run desktop     # the desktop app
+npm run app         # the same app in your browser: http://localhost:4780
+npm run dist:win    # Windows installer + portable .exe into release/
+```
+
+`npm run app` options: `--port <n>`, `--host <h>`. The server only listens on
+127.0.0.1 and only answers its own page: requests with a foreign `Host` header,
+non-JSON POSTs and cross-origin POSTs are refused.
+
+Build environment by platform:
+
+- **Windows**: native, with Git for Windows and GNU make as above. Without them,
+  `npm run app` hands itself off to WSL instead (set `RFB_NO_WSL=1` to stop
+  that). Under WSL, local trees on a Windows drive are mirrored into WSL with
+  rsync before each probe and build, because the firmware Makefile's
+  `git diff --shortstat` is impractically slow over `/mnt/c`. The mirror never
+  writes to your folder.
+- **Linux / macOS**: `make` and `git` on PATH.
+
+Environment variables:
+
+| Variable | Effect |
+|---|---|
+| `RFB_CACHE_DIR` | cache root (sources, toolchains, history), default `%LOCALAPPDATA%` / `~/.cache` |
+| `RFB_OUTPUT_DIR` | where builds are copied (the desktop app sets Documents) |
+| `RFB_FIRMWARE_REPO` | firmware git URL to clone releases from |
+| `RFB_NO_WSL` | `npm run app` on Windows: never hand off to WSL |
+| `RFB_SIMULATE_MISSING` | developer switch: `make,git` pretends they are missing |
+| `RFB_SELFTEST` | desktop app smoke test: load the page, print `SELFTEST {…}`, quit |
+
+## Command line
+
+```sh
+npm run cli -- build --target STM32F405 --tag release/4.6.0 --features GPS,LED_STRIP,BLACKBOX
+npm run cli -- build --target STM32F7X2 --tag release/4.6.0 --source-dir ../rotorflight-firmware
+npm run cli -- features           # friendly feature -> USE_ define mappings
+npm run cli -- targets            # target MCUs (--tag or --source-dir to read a tree)
+npm run cli -- build --help
+```
+
+Artifacts (`.hex`, `.bin`, `.elf`) go to `./output` (`--out` to change).
+`--json` prints a machine-readable result with the size report. Note that
+`--source-dir` checks out `--tag` in that clone (it must have no uncommitted
+changes); the app, by contrast, builds a local tree as-is.
 
 ## Layout
 
 | File | Role |
 |---|---|
-| `src/source.ts` | shallow clone / checkout of a firmware ref, cached per-ref |
-| `src/toolchain.ts` | install + version-verify the ARM toolchain the source demands |
-| `src/build.ts` | spawn `make`, collect artifacts, size report |
-| `src/features.ts` | friendly feature name -> `USE_XXX` define mapping |
-| `src/probe.ts` | classify each `USE_` option per target via the real preprocessor |
-| `src/app/server.ts`, `app/index.html` | sample toggle UI over `buildFirmware()` |
-| `src/index.ts` | `buildFirmware()` — the single entry point Phase 2 will wrap |
-| `src/cli.ts` | argument parsing + human/JSON output |
-| `src/errors.ts` | typed `BuildToolError` codes for every failure mode |
+| `electron/main.mjs`, `electron/preload.cjs` | desktop shell: window, menu, permissions, in-page device chooser |
+| `src/app/server.ts` | app server: API, jobs, live events, sizes, build history |
+| `app/index.html` | the app page |
+| `app/flasher.js` | MSP over Web Serial (detect, reboot) and STM32 DfuSe flashing over WebUSB |
+| `src/app/dirs.ts`, `src/app/mirror.ts` | folder browser; WSL mirror of Windows-drive trees |
+| `src/index.ts` | `buildFirmware()` and the module's public API |
+| `src/probe.ts` | classify each `USE_` option per target with the real preprocessor |
+| `src/size.ts` | linker region parsing and the removal estimate |
+| `src/hex.ts` | Intel HEX parsing and board-config insertion |
+| `src/releases.ts`, `src/boards.ts` | GitHub releases and official sizes; the board list |
+| `src/buildenv.ts` | find (or install with winget) the build tools |
+| `src/source.ts`, `src/toolchain.ts`, `src/download.ts` | cached checkouts; toolchain install with verified download |
+| `src/build.ts` | run `make`, collect artifacts, size report |
+| `src/option-info.ts`, `data/option-info.json` | option descriptions and Your setup features |
+| `src/cli.ts`, `src/features.ts` | command line; friendly feature names |
+| `src/errors.ts` | typed `BuildToolError` codes |
 
 ## Tests
 
 ```sh
-npm test          # node:test, no external deps
+npm test            # node:test, no external deps
 npm run typecheck
 ```
 
-Unit tests cover define assembly, streaming/exec behaviour, and CLI surface. A
-real cross-platform build + diff against the official CI artifact (scope doc
-§6.2) runs in CI, not here.
-
 ## Status
 
-Phase 1. End-to-end validated on Windows-via-WSL against `release/4.6.0`
-(STM32F405): clone → toolchain → compile → artifacts, and a `--config-erase`
-build matches the official release hex byte-for-byte except the embedded build
-timestamp. Not wired into the Configurator. Not gated for release.
+Validated on Windows, natively and under WSL: a `--config-erase` build of
+`release/4.6.0` matches the official release hex byte for byte apart from the
+embedded build timestamp, and Build & flash has been flashed and verified on a
+real board. Not yet wired into the Configurator.
 
-Known firmware-side blocker for the UI phase: Rotorflight 4.6 builds with
-`-Werror` and hard-`#define`s many `USE_XXX` features in its target headers, so
-passing `-D` for an already-defined feature fails the build. See
-[docs/scope-doc-updates.md](docs/scope-doc-updates.md).
+Stripping stock features needs guards in the firmware (see
+[Firmware guards](#firmware-guards) and
+[docs/scope-doc-updates.md](docs/scope-doc-updates.md)): Rotorflight builds with
+`-Werror` and hard-`#define`s many features in its target headers.
