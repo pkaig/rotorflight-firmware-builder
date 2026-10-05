@@ -902,7 +902,7 @@ function restoreSelection() {
   for (const o of session.probe.options) {
     if (o.state === "on-removable" && need(o.name) === "unneeded") remove.add(o.name);
     // A ticked feature opts its ENABLE_-guarded options in; an unticked one drops them.
-    if (o.state === "off-addable" && o.guard?.startsWith("ENABLE_") && o.name === `USE_${o.guard.slice("ENABLE_".length)}`) {
+    if (isOptIn(o)) {
       if (need(o.name) === "needed") add.add(o.name);
       else if (need(o.name) === "unneeded") add.delete(o.name);
     }
@@ -982,7 +982,7 @@ $("features").addEventListener("change", (e) => {
     // Opt-in options (an ENABLE_ guard in the firmware) follow the feature both ways.
     // Only the option a flag is named after (ENABLE_CMS -> USE_CMS), so another feature
     // that shares the flag (HoTT text mode) cannot switch CMS on by itself.
-    const optIn = o.state === "off-addable" && o.guard?.startsWith("ENABLE_") && o.name === `USE_${o.guard.slice("ENABLE_".length)}`;
+    const optIn = isOptIn(o);
     if (e.target.checked) { remove.delete(name); if (optIn) add.add(name); }
     else if (o.state === "on-removable" && need(name) === "unneeded") remove.add(name);
     else if (optIn && need(name) === "unneeded") add.delete(name);
@@ -990,15 +990,28 @@ $("features").addEventListener("change", (e) => {
   renderFeatures(); renderList(); renderCard(); schedulePreview();
 });
 
+/** An option a feature switches on through its own ENABLE_ guard (ENABLE_CMS -> USE_CMS). */
+function isOptIn(o) {
+  return o.state === "off-addable" && o.guard?.startsWith("ENABLE_") && o.name === `USE_${o.guard.slice("ENABLE_".length)}`;
+}
+
+/**
+ * What Your setup implies. Ticking a feature says the model uses it; it does not
+ * ask for every optional extra of that feature that the stock firmware leaves
+ * out (GPS Plus Codes, the OLED dashboard…). So Apply removes what is not needed
+ * and adds only the deliberate opt-ins; the extras are listed for the user to
+ * switch on by hand if they want them.
+ */
 function setupPlan() {
-  const plan = { remove: [], add: [], lockedUnneeded: [], lockedNeeded: [] };
+  const plan = { remove: [], add: [], extras: [], lockedUnneeded: [], lockedNeeded: [] };
   if (!session) return plan;
   for (const o of session.probe.options) {
     const n = need(o.name);
     if (n === "unneeded" && o.state === "on-removable") plan.remove.push(o.name);
     // Followers go with their parent: they never need a guard of their own.
     if (n === "unneeded" && o.state === "on-locked" && !o.follows?.length) plan.lockedUnneeded.push(o);
-    if (n === "needed" && o.state === "off-addable") plan.add.push(o.name);
+    if (n === "needed" && isOptIn(o)) plan.add.push(o.name);
+    else if (n === "needed" && o.state === "off-addable" && !o.follows?.length) plan.extras.push(o.name);
     if (n === "needed" && o.state === "off-locked" && o.scope !== "other-mcu") plan.lockedNeeded.push(o);
   }
   return plan;
@@ -1012,8 +1025,9 @@ function renderSetupSummary() {
   $("setupSummary").innerHTML =
     `<span><b>${p.remove.length + p.lockedUnneeded.length}</b> options not needed by your setup: ` +
     `<b>${p.remove.length}</b> removable now, <b>${p.lockedUnneeded.length}</b> locked.` +
-    (p.add.length ? ` <b>${p.add.length}</b> needed option(s) to add.` : "") + `</span>` +
+    (p.add.length ? ` <b>${p.add.length}</b> opt-in option(s) to add.` : "") + `</span>` +
     `<button id="applySetup" ${pending ? "" : "disabled"}>Apply to toggles</button>` +
+    (p.extras.length ? `<span class="muted">Optional extras for your setup, not in the stock firmware (switch them on under <b>All</b> if you want them): ${p.extras.map(esc).join(", ")}</span>` : "") +
     (p.lockedNeeded.length ? `<span class="muted">Needed but unavailable here: ${p.lockedNeeded.map((o) => esc(o.name)).join(", ")}</span>` : "") +
     (guards.length ? `<details><summary>Firmware guards that would make the ${guards.length} locked ones removable</summary>` +
       `<div class="guards">${guards.map((n) => `#ifndef DISABLE_${n}\n#define ${n}\n#endif`).join("\n\n")}</div>` +
@@ -1148,7 +1162,10 @@ $("reset").addEventListener("click", () => { add.clear(); remove.clear(); render
 
 // --- preview: preprocess the whole selection together -------------------------
 let previewTimer, previewSeq = 0, previewBad = false;
+/** Added options dropped because the headers already bring them in (see runPreview). */
+let impliedDropped = [];
 function schedulePreview() {
+  impliedDropped = [];
   saveSelection();
   clearTimeout(previewTimer);
   updateButtons();
@@ -1165,6 +1182,13 @@ async function runPreview() {
   try {
     const p = await api("/api/preview", { add: [...add], remove: [...remove] });
     if (seq !== previewSeq) return;
+    const implied = p.ok ? [] : p.errors.map((e) => e.match(/"(USE_[A-Z0-9_]+)" redefined/)?.[1]).filter((n) => n && add.has(n));
+    if (implied.length) {
+      for (const n of implied) add.delete(n);
+      impliedDropped = [...new Set([...impliedDropped, ...implied])];
+      saveSelection();
+      return runPreview(); // again, without the duplicates
+    }
     previewBad = !p.ok;
     lastPreview = p; renderBudget(); renderList();
     const chosen = new Set([...add, ...remove]);
@@ -1173,6 +1197,7 @@ async function runPreview() {
       `<div class="muted" style="margin-bottom:6px">Effective change after all headers (italic = knock-on effects):</div>` +
       `<div class="diff">${p.added.map((n) => tag(n, "a")).join("")}${p.removed.map((n) => tag(n, "r")).join("")}</div>` +
       (p.ok ? "" : `<div class="err" style="margin-top:8px">${p.errors.map(esc).join("\n")}</div>`) +
+      (impliedDropped.length ? `<div class="muted" style="margin-top:8px">Not passed separately, because the firmware switches ${impliedDropped.length > 1 ? "them" : "it"} on with your other choices: ${impliedDropped.map(esc).join(", ")}</div>` : "") +
       `<div class="muted" style="margin-top:8px">OPTIONS="${esc(p.options.join(" "))}"</div>`;
   } catch (err) {
     previewBad = true;

@@ -370,6 +370,10 @@ Below the feature groups, a summary says how many options your setup does not
 need, how many can be removed now, and how many are locked. Locked ones need a
 change in the firmware first, explained in
 [section 10](#10-removing-features-firmware-guards-and-local-directories).
+**Apply to toggles** switches off the unneeded options (if you changed toggles
+by hand since). It never adds options the stock firmware leaves out: optional
+extras of the features you use (such as GPS Plus Codes, or the OLED dashboard)
+are only listed, and you can switch them on yourself under **All**.
 
 ### Step 5 — Review the options
 
