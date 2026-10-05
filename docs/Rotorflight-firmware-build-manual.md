@@ -241,9 +241,13 @@ and **GNU make**. If either is missing, the app offers to install them:
 ![The Load build environment prompt](images/build-environment.png)
 
 Click **OK** and the app installs them with **winget**, Windows' own package
-manager. Windows may ask for permission. Progress shows in the bar at the top
-and in the log. Click **Not now** to skip; a notice at the top of the window
-offers it again.
+manager. They are installed for your user only, so no administrator permission
+is normally needed. (If Git cannot be installed that way, the app falls back to
+a normal install: Windows then asks for permission, and that prompt may only
+show as a flashing shield icon in the taskbar.) Progress shows in the bar at the
+top and in the log; each install gives up after 15 minutes rather than waiting
+forever. Click **Not now** to skip; a notice at the top of the window offers it
+again.
 
 The ARM compiler itself downloads automatically the first time you load a
 firmware version, and is checked against a known checksum before it is used.

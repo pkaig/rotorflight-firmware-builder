@@ -53,3 +53,38 @@ test("missing make binary maps to MAKE_NOT_FOUND", async () => {
     (e: unknown) => isBuildToolError(e) && e.code === "MAKE_NOT_FOUND",
   );
 });
+
+test("finishes when the process exits even if a helper it started holds the output open", async () => {
+  // The parent prints, starts a detached helper that inherits stdout and lives on,
+  // then exits: the pipe stays open, as with an installer's background process.
+  const parent = `
+    const { spawn } = require("node:child_process");
+    console.log("done");
+    spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], { stdio: "inherit", detached: true }).unref();
+    process.exit(0);`;
+  const t0 = Date.now();
+  const r = await exec(NODE, ["-e", parent]);
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /done/);
+  assert.ok(Date.now() - t0 < 10000, `took ${Date.now() - t0} ms`);
+});
+
+test("the child gets no stdin, so a prompt cannot wait forever", async () => {
+  const r = await exec(NODE, ["-e", "process.stdin.on('data', () => {}); process.stdin.on('end', () => console.log('eof'));"]);
+  assert.match(r.stdout, /eof/);
+});
+
+test("a timeout stops the process and fails clearly", async () => {
+  await assert.rejects(exec(NODE, ["-e", "setTimeout(() => {}, 30000)"], { timeoutMs: 500 }), /did not finish/);
+});
+
+test("lines redrawn with carriage returns report progress and keep their final state", async () => {
+  const progress: string[] = [];
+  const lines: string[] = [];
+  await exec(NODE, ["-e", "process.stdout.write('10%\\r'); setTimeout(() => process.stdout.write('50%\\r100%\\nok\\n'), 100);"], {
+    onProgress: (t) => progress.push(t),
+    onEvent: (e) => lines.push(e.line),
+  });
+  assert.ok(progress.includes("10%"));
+  assert.deepEqual(lines, ["100%", "ok"]);
+});

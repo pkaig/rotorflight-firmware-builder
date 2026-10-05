@@ -224,6 +224,14 @@ function buildMenu() {
       label: "File",
       submenu: [
         { label: "Open builds folder", click: () => shell.openPath(process.env.RFB_OUTPUT_DIR) },
+        {
+          // The app's log on disk (it survives restarts): handy when something got stuck.
+          label: "Open log file",
+          click: async () => {
+            const { cacheRoot } = await import(pathToFileURL(join(root, "dist", "config.js")).href);
+            shell.openPath(join(cacheRoot(), "app.log"));
+          },
+        },
         { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
       ],

@@ -290,6 +290,9 @@
   .reason { font-size: 11.5px; color: var(--color-text-muted); }
   .empty { padding: 40px; text-align: center; color: var(--color-text-muted); }
   .stale { opacity: .35; pointer-events: none; filter: grayscale(1); }
+  /* Setting up the build environment: hide everything from Firmware source down. */
+  body.envsetup header > .source, body.envsetup header > label.f, body.envsetup header > .loadwrap,
+  body.envsetup main, body.envsetup .floatcard, body.envsetup #envInstall { display: none; }
 
   /* Switch (the Configurator's 44×20 pill). */
   .sw { position: relative; width: 44px; height: 20px; }
@@ -618,7 +621,8 @@
   <p>Building firmware on this PC needs a few free tools that are not installed yet:</p>
   <ul id="envList"></ul>
   <p>Click <b>OK</b> to download and install them with winget, Windows' package manager.
-     Windows may ask for permission. Progress shows in the bar at the top and in the log.</p>
+     They are installed for your user only, so no administrator permission is normally needed.
+     Progress shows in the bar at the top and in the log.</p>
   <p class="muted">The ARM compiler (about 180 MB) downloads automatically, and is checksum-verified,
      the first time you load a firmware.</p>
   <div class="dlgbtns">
@@ -1910,6 +1914,9 @@ let jobTimer = null, jobState = null;
 function renderJob(j) {
   jobState = j;
   $("jobBanner").hidden = !j;
+  // While the build environment installs, nothing below can work yet: show only
+  // the notice and the progress banner.
+  document.body.classList.toggle("envsetup", j?.name === "setup");
   clearInterval(jobTimer);
   if (!j) return;
   $("jobTitle").textContent = j.title;

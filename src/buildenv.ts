@@ -165,26 +165,56 @@ export interface WingetPackage {
 export async function installBuildTools(
   packages: WingetPackage[],
   onLine: (line: string, stream?: string) => void,
+  onProgress?: (text: string) => void,
 ): Promise<{ id: string; ok: boolean }[]> {
   const results: { id: string; ok: boolean }[] = [];
   for (const p of packages) {
-    onLine(`Installing ${p.name} (${p.id}) with winget…`);
-    const r = await exec(
-      "winget",
-      ["install", "--id", p.id, "--exact", "--source", "winget", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
-      { allowNonZero: true, onEvent: (e) => onLine(e.line, e.stream) },
-    );
-    // 0x8A15002B (APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE): already installed, nothing newer.
-    const already = r.code === 0x8a15002b;
-    const ok = r.code === 0 || already;
+    // Per-user first: Git for Windows otherwise installs machine-wide, which
+    // needs an administrator (UAC) prompt. Started from the background, that
+    // prompt often only flashes in the taskbar, and the install waits on it
+    // unseen. A per-user install needs no prompt; the machine-wide one is the
+    // fallback. (detectWindows() finds either.)
+    const scopes = p.id === "Git.Git" ? ["user", ""] : [""];
+    let r: { code: number } | undefined;
+    for (const scope of scopes) {
+      onLine(`Installing ${p.name} (${p.id}) with winget${scope ? ` for this user` : ""}…`);
+      if (!scope && scopes.length > 1) {
+        onLine("Windows may ask for permission: look for a flashing shield icon in the taskbar.");
+      }
+      r = await exec(
+        "winget",
+        ["install", "--id", p.id, "--exact", "--source", "winget", ...(scope ? ["--scope", scope] : []),
+          "--silent", "--disable-interactivity", "--accept-package-agreements", "--accept-source-agreements"],
+        {
+          allowNonZero: true,
+          timeoutMs: INSTALL_TIMEOUT_MS,
+          // winget redraws spinners and download bars in place: show them in the
+          // progress banner, and only real messages in the log.
+          onProgress: (t) => onProgress?.(`${p.name}: ${t.replace(/[█▒]+/g, "").replace(/\s+/g, " ").trim()}`),
+          onEvent: (e) => { if (!/^[\s\-\\|/█▒]*$/.test(e.line) && !/[█▒]/.test(e.line)) onLine(e.line, e.stream); },
+        },
+      ).catch((err: Error) => {
+        onLine(err.message, "stderr");
+        return { code: -1 };
+      });
+      if (r.code === 0 || r.code === ALREADY_INSTALLED) break;
+    }
+    const code = r!.code;
+    const already = code === ALREADY_INSTALLED;
+    const ok = code === 0 || already;
     onLine(
-      r.code === 0 ? `${p.name} installed.` : already ? `${p.name} is already installed.` : `winget exited with code ${r.code} for ${p.name}.`,
+      code === 0 ? `${p.name} installed.` : already ? `${p.name} is already installed.` : `winget could not install ${p.name} (code ${code}).`,
       ok ? "info" : "stderr",
     );
     results.push({ id: p.id, ok });
   }
   return results;
 }
+
+/** 0x8A15002B (APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE): already installed, nothing newer. */
+const ALREADY_INSTALLED = 0x8a15002b;
+/** A stuck install (e.g. a prompt nobody sees) fails after this, rather than never. */
+const INSTALL_TIMEOUT_MS = 15 * 60 * 1000;
 
 async function which(cmd: string, path: string): Promise<string | undefined> {
   const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];

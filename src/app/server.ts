@@ -11,7 +11,7 @@
  */
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, type WriteStream } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -230,7 +230,27 @@ const log = (line: string, stream = "info") => {
   logTail.push({ line, stream });
   if (logTail.length > 400) logTail.splice(0, logTail.length - 400);
   emit("log", { line, stream });
+  logFile?.write(`${new Date().toISOString()} ${stream === "info" ? "" : `[${stream}] `}${line}\n`);
 };
+
+/**
+ * The log, also kept on disk (cacheRoot()/app.log, previous run's in app.log.1)
+ * so that what happened survives a restart — e.g. a setup that seemed stuck.
+ */
+export const LOG_FILE = () => join(cacheRoot(), "app.log");
+let logFile: WriteStream | undefined;
+function openLogFile() {
+  try {
+    mkdirSync(cacheRoot(), { recursive: true });
+    const file = LOG_FILE();
+    if (existsSync(file) && statSync(file).size > 2 * 1024 * 1024) renameSync(file, `${file}.1`);
+    logFile = createWriteStream(file, { flags: "a" });
+    logFile.on("error", () => { logFile = undefined; });
+    logFile.write(`\n${new Date().toISOString()} ---- Rotorflight Firmware Builder ${VERSION} started (${process.platform}) ----\n`);
+  } catch {
+    logFile = undefined; // logging to disk is a convenience, never a reason to fail
+  }
+}
 
 /** What the running job is doing, for the page's progress banner. */
 interface JobState {
@@ -639,8 +659,9 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       const env = buildEnv ?? (await detectBuildEnv());
       if (!env.canInstall) return send(res, 400, { error: env.ok ? "Nothing to install." : "winget is not available to install the tools." });
       const started = startJob("setup", "Loading build environment", async () => {
-        step(`Installing ${env.installable!.map((p) => p.name).join(" and ")} (Windows may ask for permission)`);
-        await installBuildTools(env.installable!, (line, stream) => log(line, stream));
+        step(`Installing ${env.installable!.map((p) => p.name).join(" and ")}`);
+        // winget's live download/progress text goes to the banner, its messages to the log.
+        await installBuildTools(env.installable!, (line, stream) => log(line, stream), (text) => step(text));
         step("Checking the build tools");
         buildEnv = await detectBuildEnv(true);
         if (buildEnv.ok) {
@@ -847,6 +868,8 @@ export async function startServer(opts: { port?: number; host?: string } = {}): 
   for (const p of buildEnv.problems) process.stderr.write(`Build environment: ${p}\n`);
   // Preprocessor scratch folders left behind by earlier runs.
   sweepProbeTemp().catch(() => {});
+  openLogFile();
+  for (const p of buildEnv.problems) log(`Build environment: ${p}`, "stderr");
 
   const host = opts.host ?? "127.0.0.1";
   return new Promise((resolvePromise, reject) => {

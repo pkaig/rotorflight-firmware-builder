@@ -47,6 +47,13 @@ test("the app reports its version from package.json", async () => {
   assert.equal(state.version, pkg.version);
 });
 
+test("the log is also written to app.log in the cache folder", async () => {
+  await call("/api/rename-build", { method: "POST", headers: json, body: "{not json" }); // anything; the startup line is enough
+  await new Promise((r) => setTimeout(r, 200));
+  const text = readFileSync(join(process.env.RFB_CACHE_DIR!, "app.log"), "utf8");
+  assert.match(text, /Rotorflight Firmware Builder \d+\.\d+\.\d+ started/);
+});
+
 test("a foreign Host header (DNS rebinding) is refused", async () => {
   const r = await call("/api/dirs", { headers: { host: `attacker.example:${server.port}` } });
   assert.equal(r.status, 403);
