@@ -230,9 +230,15 @@
   @keyframes slide { from { left: -30%; } to { left: 100%; } }
 
   /* Layout + cards (the Configurator's Section: a header band on a rounded card). */
-  main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 16px; padding: 16px; }
+  :root { --side-w: 440px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) var(--side-w); gap: 16px; padding: 16px; }
   @media (max-width: 1000px) { main { grid-template-columns: 1fr; } .side { position: static; max-height: none; } }
   .left { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  /* Your setup with the Selection card beside it (as wide as the sidebar); Selection takes the full width until a target is loaded. */
+  .toprow { display: grid; grid-template-columns: minmax(0, 1fr) var(--side-w); gap: 16px; align-items: start; }
+  .toprow:has(> #setup[hidden]) { grid-template-columns: minmax(0, 1fr); }
+  @media (max-width: 1400px) { .toprow { grid-template-columns: minmax(0, 1fr); } }
+  .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
   .side { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 16px; align-self: start;
           max-height: calc(100vh - 32px); overflow: auto; }
   .panel { background: var(--color-surface); border: 1px solid var(--color-border-card); border-radius: var(--radius-md);
@@ -265,7 +271,7 @@
   .group h3 { font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--color-text-muted); margin: 14px 0 4px;
               padding: 4px 8px; background: var(--color-surface-sunken); border-radius: var(--radius-xs);
               box-shadow: inset 3px 0 0 var(--color-neutral-600); }
-  .row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 10px; align-items: center; cursor: pointer;
+  .row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; cursor: pointer;
          padding: 6px 8px; border-radius: var(--radius-sm); transition: background-color var(--animation-speed); }
   .row:hover { background: var(--color-hover); }
   .row.locked { opacity: .5; }
@@ -291,6 +297,22 @@
   .sw input:disabled + span::after { background: var(--color-switch-handle-disabled); }
   .sw input:disabled:checked + span { background: var(--color-switch-disabled-checked); }
   .sw input:focus-visible + span { box-shadow: 0 0 0 3px var(--color-focus-ring); }
+
+  /* The (i) button on each option: opens the floating details card. */
+  .infobtn { width: 22px; height: 22px; padding: 0; border-radius: 50%; display: grid; place-items: center;
+             background: transparent; border: 1.5px solid var(--color-border-accent); color: var(--color-accent-text);
+             font: italic 700 12px/1 Georgia, "Times New Roman", serif; }
+  .infobtn:hover:not(:disabled) { background: var(--color-accent-soft); color: var(--color-accent-text); border-color: var(--color-accent); }
+  .infobtn[aria-expanded="true"] { background: var(--color-accent); color: var(--color-accent-fg); border-color: var(--color-accent); }
+
+  /* Option details: a floating card over the sidebar, level with the option it describes. */
+  .floatcard { position: fixed; z-index: 40; right: 16px; width: min(var(--side-w, 440px), calc(100vw - 32px));
+               max-height: calc(100vh - 32px); overflow: auto; box-shadow: var(--shadow-lg);
+               border-color: var(--color-border-accent); animation: cardin .14s ease-out; }
+  @keyframes cardin { from { opacity: 0; transform: translateY(4px); } }
+  .floatcard > h2 { position: sticky; top: 0; z-index: 1; }
+  .cardclose { margin-left: auto; width: 24px; height: 24px; padding: 0; background: transparent; color: var(--color-text-muted); font-size: 12px; }
+  .cardclose:hover:not(:disabled) { color: var(--color-text); }
 
   /* Badges: soft semantic fills. */
   .badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
@@ -376,7 +398,12 @@
   td { text-align: left; padding: 6px; border-bottom: 1px solid var(--color-border-soft); vertical-align: top; }
   td.num { font-family: var(--font-mono); font-size: 11.5px; text-align: right; white-space: nowrap; }
   .dellink { color: var(--color-danger); }
-  pre.log { margin: 0; max-height: 280px; overflow: auto; font: 11px/1.4 var(--font-mono); white-space: pre-wrap;
+  /* 10 lines; click to toggle 20. */
+  pre.log { --log-rows: 10; height: calc(var(--log-rows) * 1.4em + 16px); box-sizing: border-box; cursor: pointer;
+            transition: height var(--animation-speed); }
+  pre.log.expanded { --log-rows: 20; }
+  pre.log:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+  pre.log { margin: 0; overflow: auto; font: 11px/1.4 var(--font-mono); white-space: pre-wrap;
             background: var(--color-surface-sunken); border: 1px solid var(--color-border-soft); padding: 8px; border-radius: var(--radius-sm); }
   pre.log .stderr { color: var(--color-text-muted); } pre.log .error { color: var(--color-danger); font-weight: 600; }
 
@@ -469,6 +496,7 @@
 
 <main>
   <div class="left">
+  <div class="toprow">
   <section class="panel" id="setup" hidden>
     <div class="setuphead">
       <h2>Your setup</h2>
@@ -477,6 +505,20 @@
     <div id="features"></div>
     <div id="setupSummary"></div>
   </section>
+  <div class="stack">
+    <section class="panel">
+      <h2>Selection</h2>
+      <div id="preview" class="muted">No changes — builds the baseline.</div>
+      <input type="text" id="buildName" class="buildname" maxlength="60" autocomplete="off"
+             placeholder="Name this build (optional), e.g. OMP M4" aria-label="Build name">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+        <button id="build" disabled>Build</button>
+        <button class="primary" id="buildFlash" disabled title="Build, then flash it to the connected board over USB">Build &amp; flash</button>
+        <button id="reset" disabled>Reset toggles</button>
+      </div>
+    </section>
+  </div>
+  </div>
   <section class="panel">
     <h2>Options</h2>
     <div id="summary" class="muted">Choose a firmware source and target, then <b>Load firmware</b>. The first load of a release fetches its source and toolchain, which takes a few minutes.</div>
@@ -494,30 +536,20 @@
       <div id="budgetBody" class="muted">Load a target to see its capacity.</div>
     </section>
     <section class="panel">
-      <h2>Selection</h2>
-      <div id="preview" class="muted">No changes — builds the baseline.</div>
-      <input type="text" id="buildName" class="buildname" maxlength="60" autocomplete="off"
-             placeholder="Name this build (optional), e.g. OMP M4" aria-label="Build name">
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button id="build" disabled>Build</button>
-        <button class="primary" id="buildFlash" disabled title="Build, then flash it to the connected board over USB">Build &amp; flash</button>
-        <button id="reset" disabled>Reset toggles</button>
-      </div>
-    </section>
-    <section class="panel" id="card">
-      <h2>Option details</h2>
-      <div id="cardBody" class="muted">Click an option to see what it does and whether you need it.</div>
+      <h2>Log</h2>
+      <pre class="log" id="log" tabindex="0" title="Click to show more or fewer lines" aria-expanded="false"></pre>
     </section>
     <details class="panel collapsible" id="buildsPanel">
       <summary><h2>Builds <span id="buildsCount" class="count"></span></h2></summary>
       <div id="history" class="muted">None yet. Build the baseline first so later builds show a size delta.</div>
     </details>
-    <section class="panel">
-      <h2>Log</h2>
-      <pre class="log" id="log"></pre>
-    </section>
   </aside>
 </main>
+
+<section class="panel floatcard" id="card" role="dialog" aria-labelledby="cardTitle" hidden>
+  <h2 id="cardTitle">Option details <button class="cardclose" id="cardClose" aria-label="Close option details" title="Close (Esc)">&#x2715;</button></h2>
+  <div id="cardBody"></div>
+</section>
 
 <dialog id="devDialog" aria-labelledby="devTitle">
   <h2 id="devTitle">Select a device</h2>
@@ -717,7 +749,9 @@ function renderList() {
         ` aria-label="${o.name}"><span></span></label>` +
         `<div><div class="name">${o.name}${o.info ? `<span class="title">${esc(o.info.title)}</span>` : ""}</div>` +
         (o.reason ? `<div class="reason">${esc(o.reason)}</div>` : "") +
-        `</div><div class="badges">${badges.join("")}</div></div>`);
+        `</div><button class="infobtn" data-info="${o.name}" aria-label="Details for ${o.name}" title="Details"` +
+        ` aria-expanded="${cardOpen && selectedName === o.name}">i</button>` +
+        `<div class="badges">${badges.join("")}</div></div>`);
     }
     html.push("</div>");
   }
@@ -726,6 +760,13 @@ function renderList() {
 
 $("list").addEventListener("click", (e) => {
   if (e.target.closest(".sw")) return;
+  const info = e.target.closest("[data-info]");
+  if (info) {
+    // The same (i) again closes the card.
+    if (cardOpen && selectedName === info.dataset.info) closeCard();
+    else { selectOption(info.dataset.info); openCard(info.closest("[data-row]")); }
+    return;
+  }
   const row = e.target.closest("[data-row]");
   if (row) selectOption(row.dataset.row);
 });
@@ -754,6 +795,7 @@ $("list").addEventListener("change", (e) => {
 let optionInfo = { levels: {}, features: [] };
 let ticked = new Map(); // feature id -> boolean
 let selectedName = null;
+let cardOpen = false, cardAnchor = null; // the floating option details card
 
 function featureKey() { return session ? `rfb.setup.${session.target}` : null; }
 
@@ -921,6 +963,52 @@ $("setupSummary").addEventListener("click", async (e) => {
 });
 
 // --- option details card ------------------------------------------------------------
+
+
+function openCard(row) {
+  cardOpen = true;
+  cardAnchor = row;
+  $("card").hidden = false;
+  renderCard();
+  placeCard();
+  syncInfoButtons();
+  $("cardClose").focus({ preventScroll: true });
+}
+
+function closeCard() {
+  if (!cardOpen) return;
+  const back = selectedName && document.querySelector(`[data-info="${CSS.escape(selectedName)}"]`);
+  cardOpen = false;
+  cardAnchor = null;
+  $("card").hidden = true;
+  syncInfoButtons();
+  back?.focus({ preventScroll: true });
+}
+
+function syncInfoButtons() {
+  for (const b of document.querySelectorAll("[data-info]")) b.setAttribute("aria-expanded", String(cardOpen && b.dataset.info === selectedName));
+}
+
+/** Over the sidebar, its top level with the option's row, kept inside the window. */
+function placeCard() {
+  if (!cardOpen) return;
+  const card = $("card");
+  const row = cardAnchor?.isConnected ? cardAnchor : document.querySelector(`[data-row="${CSS.escape(selectedName)}"]`);
+  const side = document.querySelector(".side").getBoundingClientRect();
+  const wide = getComputedStyle(document.querySelector("main")).gridTemplateColumns.split(" ").length > 1;
+  card.style.right = wide ? `${Math.max(16, innerWidth - side.right)}px` : "16px";
+  const want = row ? row.getBoundingClientRect().top - 50 : 16;
+  card.style.top = `${Math.max(16, Math.min(want, innerHeight - card.offsetHeight - 16))}px`;
+}
+
+$("cardClose").addEventListener("click", closeCard);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && cardOpen && !document.querySelector("dialog[open]")) closeCard(); });
+// A click anywhere else closes it (the option rows' own (i) buttons toggle it above).
+document.addEventListener("pointerdown", (e) => {
+  if (cardOpen && !e.target.closest("#card, [data-info], dialog")) closeCard();
+});
+addEventListener("resize", placeCard);
+
 function selectOption(name) {
   selectedName = name;
   for (const el of document.querySelectorAll(".row.selected")) el.classList.remove("selected");
@@ -945,12 +1033,8 @@ function measuredDelta(o) {
 }
 
 function renderCard() {
-  const o = selectedName && session?.probe.options.find((x) => x.name === selectedName);
-  if (!o) {
-    $("cardBody").classList.add("muted");
-    $("cardBody").innerHTML = `Click an option to see what it does and whether you need it.`;
-    return;
-  }
+  const o = cardOpen && selectedName && session?.probe.options.find((x) => x.name === selectedName);
+  if (!o) { if (cardOpen) closeCard(); return; }
   const i = o.info;
   const fams = (o.families || []).join("/");
   const n = need(o.name);
@@ -1911,6 +1995,18 @@ if (window.rfbDesktop) {
   $("devCancel").addEventListener("click", () => answerDevice(""));
   // Closing any other way (Esc) must still answer, or the request would hang.
   $("devDialog").addEventListener("close", () => answerDevice(""));
+}
+
+// The log: click (or Enter/Space) toggles 10 / 20 lines. Selecting text does not toggle.
+{
+  const logEl = $("log");
+  const toggleLog = () => {
+    const on = logEl.classList.toggle("expanded");
+    logEl.setAttribute("aria-expanded", String(on));
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+  logEl.addEventListener("click", () => { if (!String(window.getSelection?.() ?? "")) toggleLog(); });
+  logEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleLog(); } });
 }
 
 api("/api/state").then(async (s) => {
