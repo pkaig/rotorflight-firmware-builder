@@ -156,6 +156,8 @@
   }
   header .brand { display: flex; align-items: center; gap: 12px; flex-basis: 100%; }
   header .logo { height: 26px; width: auto; display: block; }
+  header .appversion { font: 11.5px var(--font-mono); color: var(--chrome-fg-muted); margin-left: -4px; }
+  header .appversion:empty { display: none; }
   header .appname { font-size: 14px; font-weight: 600; color: var(--chrome-fg); letter-spacing: .01em;
                     padding-left: 12px; border-left: 1px solid var(--chrome-border); }
   header .brand .spacer { flex: 1; }
@@ -486,6 +488,7 @@
   <div class="brand">
     <img class="logo" src="/assets/rotorflight-logo.svg" alt="Rotorflight" onerror="this.outerHTML=&quot;<span class=logotext>ROTOR<b>FLIGHT</b></span>&quot;">
     <span class="appname">Firmware Builder</span>
+    <span class="appversion" id="appVersion" title="App version"></span>
     <span class="status" id="status">idle</span>
     <span class="spacer"></span>
     <button class="textbtn" id="manualBtn" title="Open the user manual" aria-haspopup="dialog">Manual</button>
@@ -1367,6 +1370,7 @@ es.addEventListener("open", async () => {
   disconnected = false;
   try {
     const s = await api("/api/state");
+    showVersion(s.version); // a restarted server may be a newer version
     builds = s.history; renderHistory();
     setBusy(s.busy);
     renderJob(s.job);
@@ -2097,7 +2101,10 @@ $("manualBody").addEventListener("click", (e) => {
   logEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleLog(); } });
 }
 
+function showVersion(v) { $("appVersion").textContent = v ? `v${v}` : ""; }
+
 api("/api/state").then(async (s) => {
+  showVersion(s.version);
   renderJob(s.job);
   for (const l of s.log || []) appendLog(l.line, l.stream);
   builds = s.history; renderHistory();

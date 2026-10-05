@@ -260,7 +260,7 @@ install them (see [Installing](#linux)).
 
 | Area | What it is for |
 |---|---|
-| **Header** (top) | Choose the board, the firmware source and the target, then **Load firmware**. At the top right, **Manual** opens this manual and ◐ switches between dark and light themes. |
+| **Header** (top) | Choose the board, the firmware source and the target, then **Load firmware**. The app's version (e.g. `v1.0.0`) is shown next to its name; quote it when reporting a problem. At the top right, **Manual** opens this manual and ◐ switches between dark and light themes. |
 | **Your setup** (left) | Tick the features your model uses. Options only needed by unticked features are switched off. |
 | **Selection** (middle) | The effective change from stock firmware, a name for the build, and the **Build** and **Build & flash** buttons. |
 | **Options** (below) | Every `USE_` option for the target, with its state and a switch. |

@@ -1,7 +1,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,6 +38,13 @@ test("the page's own requests are served", async () => {
   assert.equal((await call("/api/state")).status, 200);
   const r = await call("/api/rename-build", { method: "POST", headers: json, body: JSON.stringify({ at: "nope" }) });
   assert.equal(r.status, 404); // reached the handler: no such build
+});
+
+test("the app reports its version from package.json", async () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  const state = JSON.parse((await call("/api/state")).body) as { version: string };
+  assert.match(state.version, /^\d+\.\d+\.\d+/);
+  assert.equal(state.version, pkg.version);
 });
 
 test("a foreign Host header (DNS rebinding) is refused", async () => {

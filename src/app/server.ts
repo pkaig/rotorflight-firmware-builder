@@ -51,6 +51,14 @@ const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "..");
 const PAGE = join(ROOT, "app", "index.html");
 const OPTION_INFO = join(ROOT, "data", "option-info.json");
 const MANUAL = join(ROOT, "docs", "Rotorflight-firmware-build-manual.md");
+/** The app's version, from package.json (the same one the installers are named after). */
+const VERSION: string = (() => {
+  try {
+    return (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version?: string }).version ?? "";
+  } catch {
+    return "";
+  }
+})();
 
 interface Session {
   ref: string;
@@ -610,6 +618,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         session: publicSession(),
         history,
         targets: KNOWN_UNIFIED_TARGETS,
+        version: VERSION,
       });
 
     case "GET /api/targets": {
