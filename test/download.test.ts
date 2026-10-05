@@ -51,3 +51,10 @@ test("toolchainEnv puts the toolchain first on PATH, whatever the key's spelling
   assert.equal(win.Path, `C:\\tc\\bin${sep}C:\\Windows`);
   assert.equal(toolchainEnv("/tc/bin", {}).PATH, "/tc/bin");
 });
+
+test("armSdkPrefix uses forward slashes, which survive make's sh", async () => {
+  const { armSdkPrefix } = await import("../src/toolchain.ts");
+  assert.equal(armSdkPrefix("C:/tc/bin"), "C:/tc/bin/arm-none-eabi-");
+  assert.ok(!armSdkPrefix(String.raw`C:\Users\x\tools\bin`).includes(String.fromCharCode(92)));
+  assert.equal(armSdkPrefix("/home/x/tools/bin"), "/home/x/tools/bin/arm-none-eabi-");
+});

@@ -54,6 +54,14 @@ test("the log is also written to app.log in the cache folder", async () => {
   assert.match(text, /Rotorflight Firmware Builder \d+\.\d+\.\d+ started/);
 });
 
+test("a repository address that is not plain https is refused before git runs", async () => {
+  const r = await call(`/api/remote-refs?repo=${encodeURIComponent("file:///C:/Windows")}`);
+  assert.equal(r.status, 400);
+  const load = await call("/api/load", { method: "POST", headers: json,
+    body: JSON.stringify({ ref: "master", target: "STM32F405", repo: "git@github.com:a/b.git" }) });
+  assert.equal(load.status, 400);
+});
+
 test("a foreign Host header (DNS rebinding) is refused", async () => {
   const r = await call("/api/dirs", { headers: { host: `attacker.example:${server.port}` } });
   assert.equal(r.status, 403);

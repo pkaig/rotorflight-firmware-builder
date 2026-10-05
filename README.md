@@ -80,8 +80,10 @@ Builds go to `~/Documents/Rotorflight Firmware Builder`.
    from the list (the Configurator's `rotorflight-targets`). A board that is
    already plugged in and permitted is detected automatically at start-up.
 2. Choose the **firmware source**: a Rotorflight release from GitHub (tick
-   *RCs & snapshots* for more), or a **local directory**, such as your own clone
-   with firmware-side changes. A local tree is built exactly as it is on disk.
+   *RCs & snapshots* for more); an **online repository**, such as someone's fork
+   (`owner/repo` or any public `https://` git URL, then pick a branch or tag); or
+   a **local directory**, such as your own clone with firmware-side changes. A
+   local tree is built exactly as it is on disk.
 3. **Load firmware**. The first load of a release fetches its source and the
    toolchain, which takes a few minutes. The app then probes every `USE_`
    option for the target with the real preprocessor. A banner shows each step.

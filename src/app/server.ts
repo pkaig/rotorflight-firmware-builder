@@ -42,7 +42,7 @@ import { annotateOptions, loadOptionInfo } from "../option-info.ts";
 import { sweepProbeTemp } from "../probe.ts";
 import { listReleases, nearestRelease, releaseHexSize, treeVersion, type ReleaseSize } from "../releases.ts";
 import { buildSizeModel, estimateRemoval, type MemoryRegion, type SizeModel } from "../size.ts";
-import { cachedSourcePath } from "../source.ts";
+import { cachedSourcePath, isOfficialRepo, listRemoteRefs, parseRepo, type RepoSpec } from "../source.ts";
 import { listDirs, normalisePath } from "./dirs.ts";
 import { renderMarkdown } from "./markdown.ts";
 import { needsMirror, syncMirror } from "./mirror.ts";
@@ -68,6 +68,9 @@ interface Session {
   local: boolean;
   /** The user's own folder when sourceDir is a WSL mirror of it. */
   origin?: string;
+  /** Another online repository (e.g. a fork) the ref was cloned from: its URL, and "owner/repo". */
+  repo?: string;
+  repoName?: string;
   /** Source files changed in the folder since it was probed (re-probe to pick up new guards). */
   staleFiles?: string[];
   target: string;
@@ -119,7 +122,7 @@ interface SizeInfo {
 /** The most recent baseline build of the same folder, target and make vars, at any commit. */
 function latestBaselineOfTree(
   records: Record<string, BaselineRecord>,
-  s: Pick<Session, "commit" | "target" | "makeVars" | "local" | "sourceDir">,
+  s: Pick<Session, "commit" | "target" | "makeVars" | "local" | "sourceDir" | "repo">,
 ): [BaselineRecord, string] | [] {
   const [, target, vars, dir] = baselineKey(s).split("|");
   const hits = Object.entries(records)
@@ -155,8 +158,8 @@ async function git(dir: string, args: string[]): Promise<string> {
 
 /** Baselines survive restarts, keyed by what produced them. */
 const SIZES_FILE = () => join(cacheRoot(), "baselines.json");
-const baselineKey = (s: Pick<Session, "commit" | "target" | "makeVars" | "local" | "sourceDir">) =>
-  [s.commit, s.target, JSON.stringify(Object.entries(s.makeVars).sort()), s.local ? s.sourceDir : ""].join("|");
+const baselineKey = (s: Pick<Session, "commit" | "target" | "makeVars" | "local" | "sourceDir" | "repo">) =>
+  [s.commit, s.target, JSON.stringify(Object.entries(s.makeVars).sort()), s.local || s.repo ? s.sourceDir : ""].join("|");
 
 async function readBaselines(): Promise<Record<string, BaselineRecord>> {
   try {
@@ -305,12 +308,15 @@ interface LoadRequest {
   target: string;
   ref: string;
   sourceDir?: string;
+  /** Another online repository to clone `ref` from (parsed by parseRepo()). */
+  repo?: RepoSpec;
   configErase?: boolean;
 }
 
 async function load(req: LoadRequest) {
   const onEvent = (e: { stream: string; line: string }) => log(e.line, e.stream);
-  log(`Resolving source ${req.sourceDir ? `${req.sourceDir} (as-is)` : req.ref}…`);
+  const fork = req.repo && !isOfficialRepo(req.repo.url) ? req.repo : undefined;
+  log(`Resolving source ${req.sourceDir ? `${req.sourceDir} (as-is)` : fork ? `${fork.name} @ ${req.ref}` : req.ref}…`);
   let buildDir = req.sourceDir || undefined;
   let origin: string | undefined;
   if (buildDir && needsMirror(buildDir)) {
@@ -320,12 +326,13 @@ async function load(req: LoadRequest) {
     origin = buildDir;
     buildDir = m.dir;
   } else {
-    step(req.sourceDir ? "Reading the local tree" : "Fetching source from GitHub (first time: about a minute)");
+    step(req.sourceDir ? "Reading the local tree" : `Fetching source from ${fork ? fork.name : "GitHub"} (first time: about a minute)`);
   }
   const source = await ensureSource({
     ref: req.ref,
     sourceDir: buildDir,
     asIs: Boolean(req.sourceDir),
+    ...(fork ? { repo: fork.url } : {}),
     onEvent,
   });
 
@@ -334,7 +341,8 @@ async function load(req: LoadRequest) {
 
   log("Checking toolchain…");
   step("Checking toolchain (first time: downloads about 180 MB)");
-  const toolchain = await ensureToolchain(source.dir, onEvent, { borrow: Boolean(req.sourceDir) });
+  // A local tree or a fork reuses the release cache's verified compiler when it matches.
+  const toolchain = await ensureToolchain(source.dir, onEvent, { borrow: Boolean(req.sourceDir || fork) });
   if (toolchain.borrowed) log(`Using the cached ${toolchain.version} toolchain at ${toolchain.binDir} (this tree's own tools/ does not run here).`);
 
   const makeVars: Record<string, string> = req.configErase ? { FLASH_CONFIG_ERASE: "yes" } : {};
@@ -358,6 +366,7 @@ async function load(req: LoadRequest) {
     sourceDir: source.dir,
     local: Boolean(req.sourceDir),
     ...(origin ? { origin } : {}),
+    ...(fork ? { repo: fork.url, repoName: fork.name } : {}),
     target: req.target,
     makeVars,
     pp,
@@ -368,18 +377,25 @@ async function load(req: LoadRequest) {
   };
   step("Reading the official release size");
   try {
-    // A release source, or a local tree whose HEAD is exactly a release tag.
-    let tag = session.local ? "" : req.ref;
+    // A release source, or a local tree whose HEAD is exactly a release tag. Another
+    // repository's tags are not the official builds, so a fork is approximated by the
+    // release nearest its declared version, as any other tree is.
+    const useNearestRelease = async () => {
+      const version = await treeVersion(source.dir);
+      const near = version ? await nearestRelease(version) : undefined;
+      const nearest = near ? await releaseHexSize(near, req.target) : null;
+      if (nearest) session!.sizes.nearest = nearest;
+    };
+    let tag = session.local || session.repo ? "" : req.ref;
     if (session.local) {
       tag = (await git(source.dir, ["tag", "--points-at", "HEAD"])).split("\n").find((t) => /^(release|snapshot)\//.test(t)) ?? "";
       if (tag) {
         session.sizes.modifiedFromTag = (await git(source.dir, ["diff", "--shortstat", "HEAD", "--", "src", "make", "Makefile"])) !== "";
       } else {
-        const version = await treeVersion(source.dir);
-        const near = version ? await nearestRelease(version) : undefined;
-        const nearest = near ? await releaseHexSize(near, req.target) : null;
-        if (nearest) session.sizes.nearest = nearest;
+        await useNearestRelease();
       }
+    } else if (session.repo) {
+      await useNearestRelease();
     }
     const official = tag ? await releaseHexSize(tag, req.target) : null;
     if (official) {
@@ -391,9 +407,9 @@ async function load(req: LoadRequest) {
   }
   const records = await readBaselines();
   const known = records[baselineKey(session)];
-  // A local tree moves on with every commit: its last baseline build is a far
-  // better reference than any release, and its ELF still drives the estimates.
-  const [, prevKey] = session.local && !known ? latestBaselineOfTree(records, session) : [];
+  // A local tree (or a fork's branch) moves on with every commit: its last baseline
+  // build is a far better reference than any release, and its ELF still drives the estimates.
+  const [, prevKey] = (session.local || session.repo) && !known ? latestBaselineOfTree(records, session) : [];
   if (known) {
     session.sizes.baseline = { ...known, source: "build" };
     await attachModel(session).catch((err) => log(`Size model unavailable: ${err}`, "stderr"));
@@ -467,7 +483,7 @@ async function build(sel: Selection, at: string, name?: string) {
       ok: true,
       makeVars: s.makeVars,
       ...(name ? { name } : {}),
-      source: s.local ? s.origin ?? s.sourceDir : s.ref,
+      source: s.local ? s.origin ?? s.sourceDir : s.repoName ? `${s.repoName} @ ${s.ref}` : s.ref,
       ...r.size,
       hexPath: r.hexPath,
       durationMs: r.durationMs,
@@ -644,10 +660,32 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     case "GET /api/targets": {
       // MCU targets for a ref, read from its checkout when one is already on disk.
       const ref = url.searchParams.get("ref") ?? "";
-      const dir = url.searchParams.get("sourceDir") || (ref ? cachedSourcePath(ref) : "");
+      let repoUrl: string | undefined;
+      try {
+        repoUrl = url.searchParams.get("repo") ? parseRepo(url.searchParams.get("repo")!).url : undefined;
+      } catch {
+        repoUrl = undefined;
+      }
+      const dir = url.searchParams.get("sourceDir") || (ref ? cachedSourcePath(ref, repoUrl) : "");
       const fromSource = Boolean(dir) && existsSync(join(dir, "src", "main", "target"));
       const targets = fromSource ? await validTargetsFromSource(dir) : [...KNOWN_UNIFIED_TARGETS];
       return send(res, 200, { targets, fromSource });
+    }
+
+    case "GET /api/remote-refs": {
+      // Branches and tags of another repository (e.g. a fork), for the source picker.
+      let spec: RepoSpec;
+      try {
+        spec = parseRepo(url.searchParams.get("repo") ?? "");
+      } catch (err) {
+        return send(res, 400, { error: (err as Error).message });
+      }
+      try {
+        const refs = await listRemoteRefs(spec.url);
+        return send(res, 200, { ...spec, official: isOfficialRepo(spec.url), ...refs });
+      } catch (err) {
+        return send(res, 502, { error: (err as Error).message });
+      }
     }
 
     case "GET /api/env":
@@ -762,12 +800,25 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
       if (typeof body.target !== "string" || typeof body.ref !== "string" || !body.ref.trim()) {
         return send(res, 400, { error: "target and ref are required" });
       }
-      const what = typeof body.sourceDir === "string" && body.sourceDir.trim() ? body.sourceDir.trim() : body.ref!.trim();
+      const local = typeof body.sourceDir === "string" && body.sourceDir.trim() !== "";
+      // Another online repository (a fork): validated here, so a bad address is a 400.
+      const rawRepo = (body as { repo?: unknown }).repo;
+      let repo: RepoSpec | undefined;
+      if (!local && typeof rawRepo === "string" && rawRepo.trim()) {
+        try {
+          repo = parseRepo(rawRepo);
+        } catch (err) {
+          return send(res, 400, { error: (err as Error).message });
+        }
+      }
+      const ref = body.ref!.trim();
+      const what = local ? body.sourceDir!.trim() : repo && !isOfficialRepo(repo.url) ? `${repo.name} @ ${ref}` : ref;
       const started = startJob("load", `Loading ${what} for ${body.target}`, () =>
         load({
           target: body.target!,
-          ref: body.ref!.trim(),
-          sourceDir: typeof body.sourceDir === "string" && body.sourceDir.trim() ? normalisePath(body.sourceDir) : undefined,
+          ref,
+          sourceDir: local ? normalisePath(body.sourceDir!) : undefined,
+          ...(repo ? { repo } : {}),
           configErase: Boolean(body.configErase),
         }),
       );

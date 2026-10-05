@@ -146,6 +146,16 @@ export function toolchainEnv(binDir: string, base: NodeJS.ProcessEnv = process.e
   return env;
 }
 
+/**
+ * ARM_SDK_PREFIX for a toolchain outside the tree. Forward slashes: make runs
+ * every compile through sh, which strips the backslashes of a Windows path
+ * (C:\Users\… becomes C:Users…, "No such file or directory"). Windows' gcc and
+ * the MSYS shell both accept C:/Users/… .
+ */
+export function armSdkPrefix(binDir: string): string {
+  return `${binDir.replace(/\\/g, "/")}/arm-none-eabi-`;
+}
+
 function gccName(): string {
   return process.platform === "win32" ? "arm-none-eabi-gcc.exe" : "arm-none-eabi-gcc";
 }

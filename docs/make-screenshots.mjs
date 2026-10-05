@@ -212,7 +212,7 @@ app.whenReady().then(async () => {
 
       // A local clone with firmware guards: load it and untick some features.
       await js(`store("rfb.srcdir", ${JSON.stringify(clone)});
-        document.querySelector('input[name="srcmode"][value="local"]').checked = true; applySourceMode();`);
+        $("srcmode").value = "local"; applySourceMode();`);
       await sleep(800);
       await js(`selectTarget(${JSON.stringify(TARGET)}); $("load").click()`);
       await until(`session && session.local && !busy`, 600000, "local tree load");

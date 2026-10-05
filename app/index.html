@@ -204,16 +204,11 @@
   #boardstatus b { color: var(--chrome-fg); }
   #boardstatus .warn { color: var(--color-danger); }
   .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-success); margin-right: 6px; vertical-align: 1px; }
-  .source { display: flex; flex-wrap: wrap; align-items: end; gap: 6px 10px; }
-  .source > .f { flex-basis: 100%; }
-  .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: var(--radius-pill); background: var(--chrome-bg-sunken);
-         border: 1px solid var(--chrome-border); }
-  .seg label { padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; border-radius: var(--radius-pill);
-               color: var(--chrome-fg-muted); transition: background-color var(--animation-speed), color var(--animation-speed); }
-  .seg label:hover { color: var(--chrome-fg); background: var(--chrome-hover); }
-  .seg label:has(input:checked) { background: var(--chrome-accent); color: #fff; }
-  .seg label:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--color-focus-ring); }
-  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  /* Label across the top, then the source dropdown and its pane; sized to its content. */
+  .source { display: grid; grid-template-columns: auto auto; align-items: center; gap: 6px 10px; }
+  .source > .f { grid-column: 1 / -1; }
+  #repoInput { width: 210px; }
+  #repoRef { max-width: 170px; }
   .srcpane { display: flex; align-items: center; gap: 8px; }
   .srcpane[hidden] { display: none; }
   .inline { font-size: 12px; color: var(--color-text-muted); display: inline-flex; gap: 4px; align-items: center; }
@@ -505,15 +500,24 @@
     <div id="boardstatus" class="muted"></div>
   </div>
   <div class="source">
-    <span class="f">Firmware source</span>
-    <div class="seg" role="radiogroup" aria-label="Firmware source">
-      <label><input type="radio" name="srcmode" value="release" checked> Rotorflight release</label>
-      <label><input type="radio" name="srcmode" value="local"> Local directory</label>
-    </div>
+    <label class="f" for="srcmode">Firmware source</label>
+    <select id="srcmode" title="Where the firmware source comes from">
+      <option value="release">Rotorflight release</option>
+      <option value="repo">Online repository</option>
+      <option value="local">Local directory</option>
+    </select>
     <div id="srcRelease" class="srcpane">
       <select id="release"><option value="release/4.6.0">release/4.6.0</option></select>
       <label class="inline"><input type="checkbox" id="pre"> RCs &amp; snapshots</label>
       <span id="releaseSize" class="inline"></span>
+    </div>
+    <div id="srcRepo" class="srcpane" hidden>
+      <input type="text" id="repoInput" class="mono" list="repoRecent" autocomplete="off" spellcheck="false"
+             placeholder="owner/repo or https://… git URL" aria-label="Repository" title="A GitHub owner/repo, or the https:// address of any public git repository">
+      <datalist id="repoRecent"></datalist>
+      <button id="repoFind">Find branches</button>
+      <select id="repoRef" hidden aria-label="Branch or tag"></select>
+      <span id="repoStatus" class="inline"></span>
     </div>
     <div id="srcLocal" class="srcpane" hidden>
       <span id="srcdirShow" class="mono muted">no folder chosen</span>
@@ -522,6 +526,7 @@
   </div>
   <input type="hidden" id="ref" value="release/4.6.0">
   <input type="hidden" id="srcdir" value="">
+  <input type="hidden" id="repo" value="">
   <label class="f"><span id="targetlabel">Target</span> <select id="target"></select></label>
   <label class="f" style="flex-direction:row;align-items:center;gap:6px;padding-bottom:7px">
     <input type="checkbox" id="erase"> FLASH_CONFIG_ERASE</label>
@@ -691,17 +696,21 @@ async function api(path, body) {
 function setBusy(b) {
   busy = b;
   $("status").innerHTML = b ? `<b>${b}…</b>` : "idle";
-  $("load").disabled = !!b;
+  updateLoadButton();
   updateButtons();
   updateLoadNote();
   if (session) renderBudget();
 }
 
+/** Where a loaded session's source came from: a folder, "owner/repo@branch", or a release ref. */
+function sessionWhere(s) {
+  return s.local ? s.origin || s.sourceDir : s.repoName ? `${s.repoName}@${s.ref}` : s.ref;
+}
+
 function selectionDiffers() {
   if (!session) return false;
   const c = chosenSource();
-  const loadedWhere = session.local ? session.origin || session.sourceDir : session.ref;
-  return c.local !== session.local || c.where !== loadedWhere || c.target !== session.target ||
+  return c.local !== session.local || c.where !== sessionWhere(session) || c.target !== session.target ||
     c.erase !== (session.makeVars?.FLASH_CONFIG_ERASE === "yes");
 }
 
@@ -736,7 +745,7 @@ function renderSummary() {
   const p = session.probe, c = {};
   for (const o of p.options) c[o.state] = (c[o.state] || 0) + 1;
   $("summary").innerHTML =
-    `<b>${session.target}</b>${p.family ? ` (${p.family})` : ""} @ ${esc(session.local ? session.origin || session.sourceDir : session.ref)} ` +
+    `<b>${session.target}</b>${p.family ? ` (${p.family})` : ""} @ ${esc(sessionWhere(session))} ` +
     `<span class="muted">(${session.commit.slice(0, 9)})</span> — ${p.baseline.length} USE_ defines in the baseline; ` +
     `<b>${c["on-removable"] || 0}</b> removable, <b>${c["off-addable"] || 0}</b> addable, ` +
     `${(c["on-locked"] || 0) + (c["off-locked"] || 0)} locked.` +
@@ -867,7 +876,7 @@ function featureKey() { return session ? `rfb.setup.${session.target}` : null; }
 // The toggle selection is saved per firmware source + target, so a refresh or a
 // server restart brings back exactly what was chosen.
 function selectionKey() {
-  return session ? `rfb.sel.${session.local ? session.origin || session.sourceDir : session.ref}|${session.target}` : null;
+  return session ? `rfb.sel.${sessionWhere(session)}|${session.target}` : null;
 }
 function saveSelection() {
   if (!session || restoring) return;
@@ -1328,9 +1337,11 @@ function esc(s) {
 // --- wiring -----------------------------------------------------------------------
 $("load").addEventListener("click", async () => {
   try {
+    const repo = srcMode() === "repo" ? $("repo").value : "";
     await api("/api/load", {
       ref: $("ref").value, target: $("target").value,
       sourceDir: $("srcdir").value, configErase: $("erase").checked,
+      ...(repo ? { repo } : {}),
     });
   } catch (err) { appendLog(err.message, "error"); }
 });
@@ -1391,14 +1402,16 @@ function store(key, value) { try { value == null ? localStorage.removeItem(key) 
 function recall(key) { try { return localStorage.getItem(key); } catch { return null; } }
 
 async function refreshTargets() {
-  const want = $("target").value || recall("rfb.target") || "STM32F405";
   const q = new URLSearchParams({ ref: $("ref").value.trim(), sourceDir: $("srcdir").value.trim() });
+  if (srcMode() === "repo" && $("repo").value) q.set("repo", $("repo").value);
   try {
     const r = await api(`/api/targets?${q}`);
     targetList = r.targets;
     $("targetlabel").textContent = r.fromSource ? "Target" : "Target (built-in list until loaded)";
   } catch { targetList = targetList.length ? targetList : ["STM32F405"]; }
-  setTargetOptions(want);
+  // Read the choice only now: a target picked (or detected) while the list was
+  // being fetched must not be reset to what was selected when the fetch began.
+  setTargetOptions($("target").value || recall("rfb.target") || "STM32F405");
 }
 function setTargetOptions(want) {
   const list = targetList.includes(want) ? targetList : [...targetList, want];
@@ -1559,7 +1572,7 @@ async function autoDetectAtStart() {
 
 // --- firmware source: online release or a local directory ------------------------------
 let releases = [];
-function srcMode() { return document.querySelector('input[name="srcmode"]:checked').value; }
+function srcMode() { return $("srcmode").value; }
 
 function renderReleases() {
   const pre = $("pre").checked;
@@ -1573,18 +1586,93 @@ function renderReleases() {
 }
 
 function applySourceMode() {
-  const local = srcMode() === "local";
-  $("srcRelease").hidden = local;
+  const mode = srcMode();
+  const local = mode === "local";
+  $("srcRelease").hidden = mode !== "release";
+  $("srcRepo").hidden = mode !== "repo";
   $("srcLocal").hidden = !local;
   $("srcdir").value = local ? recall("rfb.srcdir") || "" : "";
   $("srcdirShow").textContent = $("srcdir").value || "no folder chosen";
   $("srcdirShow").classList.toggle("muted", !$("srcdir").value);
-  $("load").disabled = !!busy || (local && !$("srcdir").value);
-  store("rfb.srcmode", srcMode());
+  if (mode === "release") $("ref").value = $("release").value;
+  if (mode === "repo") {
+    $("ref").value = $("repoRef").value;
+    if (!$("repoInput").value) $("repoInput").value = recall("rfb.repo") || "";
+    if (!repoInfo && $("repoInput").value.trim()) findRepoRefs(); // fill the branch list again
+  }
+  updateLoadButton();
+  store("rfb.srcmode", mode);
   refreshTargets().then(updateLoadNote);
 }
 
-for (const r of document.querySelectorAll('input[name="srcmode"]')) r.addEventListener("change", applySourceMode);
+/** Load needs a folder, or a repository branch, or (always there) a release. */
+function updateLoadButton() {
+  const mode = srcMode();
+  $("load").disabled = !!busy || (mode === "local" && !$("srcdir").value) || (mode === "repo" && !(repoInfo && $("repoRef").value));
+}
+
+// --- online repository: someone's fork, on GitHub or any git host -------------------------
+let repoInfo = null; // { url, name, official } from the last successful lookup
+let repoSeq = 0;
+function renderRepoRecent() {
+  let list = [];
+  try { list = JSON.parse(recall("rfb.repos") || "[]"); } catch {}
+  $("repoRecent").innerHTML = list.map((r) => `<option value="${esc(r)}"></option>`).join("");
+}
+function rememberRepo(name) {
+  let list = [];
+  try { list = JSON.parse(recall("rfb.repos") || "[]"); } catch {}
+  store("rfb.repos", JSON.stringify([name, ...list.filter((r) => r !== name)].slice(0, 8)));
+  renderRepoRecent();
+}
+async function findRepoRefs() {
+  const input = $("repoInput").value.trim();
+  if (!input) return;
+  const seq = ++repoSeq;
+  repoInfo = null;
+  $("repo").value = "";
+  $("repoRef").hidden = true;
+  $("repoStatus").innerHTML = `<span class="muted">Looking up branches…</span>`;
+  updateLoadButton();
+  try {
+    const r = await api(`/api/remote-refs?repo=${encodeURIComponent(input)}`);
+    if (seq !== repoSeq) return;
+    if (!r.branches.length && !r.tags.length) throw new Error("it has no branches or tags");
+    repoInfo = { url: r.url, name: r.name, official: r.official };
+    $("repo").value = r.url;
+    const want = recall("rfb.repoRef");
+    const opt = (ref, label) => `<option value="${esc(ref)}">${esc(label ?? ref)}</option>`;
+    $("repoRef").innerHTML =
+      (r.branches.length ? `<optgroup label="Branches">${r.branches.map((b) => opt(b, b === r.defaultBranch ? `${b} (default)` : b)).join("")}</optgroup>` : "") +
+      (r.tags.length ? `<optgroup label="Tags">${r.tags.map((t) => opt(t)).join("")}</optgroup>` : "");
+    const all = [...r.branches, ...r.tags];
+    $("repoRef").value = all.includes(want) ? want : r.defaultBranch && all.includes(r.defaultBranch) ? r.defaultBranch : all[0];
+    $("repoRef").hidden = false;
+    $("ref").value = $("repoRef").value;
+    $("repoStatus").innerHTML = `<span class="muted" title="${r.branches.length} branches, ${r.tags.length} tags">${r.official ? "official repository" : ""}</span>`;
+    store("rfb.repo", input);
+    rememberRepo(r.name);
+  } catch (err) {
+    if (seq !== repoSeq) return;
+    $("repoStatus").innerHTML = `<span class="warn">${esc(err.message)}</span>`;
+  }
+  updateLoadButton();
+  refreshTargets().then(updateLoadNote);
+}
+$("repoFind").addEventListener("click", findRepoRefs);
+$("repoInput").addEventListener("keydown", (e) => { if (e.key === "Enter") findRepoRefs(); });
+$("repoInput").addEventListener("input", () => {
+  // A different address: the branch list no longer applies until it is looked up again.
+  if (repoInfo) { repoInfo = null; $("repo").value = ""; $("repoRef").hidden = true; $("repoStatus").textContent = ""; updateLoadButton(); updateLoadNote(); }
+});
+$("repoRef").addEventListener("change", () => {
+  $("ref").value = $("repoRef").value;
+  store("rfb.repoRef", $("repoRef").value);
+  refreshTargets().then(updateLoadNote);
+});
+renderRepoRecent();
+
+$("srcmode").addEventListener("change", applySourceMode);
 $("release").addEventListener("change", () => { $("ref").value = $("release").value; store("rfb.release", $("ref").value); refreshTargets(); });
 $("pre").addEventListener("change", () => { renderReleases(); showReleaseSize(); });
 
@@ -1606,7 +1694,7 @@ async function showReleaseSize() {
 }
 $("release").addEventListener("change", showReleaseSize);
 $("target").addEventListener("change", showReleaseSize);
-for (const r of document.querySelectorAll('input[name="srcmode"]')) r.addEventListener("change", showReleaseSize);
+$("srcmode").addEventListener("change", showReleaseSize);
 
 // Folder browser (served by the app: the browser's own picker cannot give WSL a path).
 let dirListing = null;
@@ -1906,7 +1994,7 @@ $("history").addEventListener("click", async (e) => {
   openFlash(Number(a.dataset.flash));
 });
 
-for (const r of document.querySelectorAll('input[name="srcmode"]')) r.checked = r.value === (recall("rfb.srcmode") || "release");
+$("srcmode").value = ["release", "repo", "local"].includes(recall("rfb.srcmode")) ? recall("rfb.srcmode") : "release";
 applySourceMode();
 
 // --- job banner + "selection differs from what is loaded" ------------------------------
@@ -1934,9 +2022,12 @@ function renderJob(j) {
 }
 
 function chosenSource() {
+  const mode = srcMode();
   return {
-    local: srcMode() === "local",
-    where: srcMode() === "local" ? $("srcdir").value : $("ref").value,
+    local: mode === "local",
+    // An online repository that turns out to be the official one loads as a release.
+    where: mode === "local" ? $("srcdir").value
+      : mode === "repo" && repoInfo && !repoInfo.official ? `${repoInfo.name}@${$("repoRef").value}` : $("ref").value,
     target: $("target").value,
     erase: $("erase").checked,
   };
@@ -1946,7 +2037,7 @@ function updateLoadNote() {
   let note = "";
   if (!session) note = "Nothing loaded yet.";
   else {
-    const loadedWhere = session.local ? session.origin || session.sourceDir : session.ref;
+    const loadedWhere = sessionWhere(session);
     note = selectionDiffers() ? `Loaded: ${loadedWhere} · ${session.target}. Load firmware to switch.` : "";
   }
   $("loadNote").textContent = note;
@@ -1957,7 +2048,7 @@ function updateLoadNote() {
   updateButtons();
 }
 for (const id of ["target", "erase", "release"]) $(id).addEventListener("change", updateLoadNote);
-for (const r of document.querySelectorAll('input[name="srcmode"]')) r.addEventListener("change", updateLoadNote);
+$("srcmode").addEventListener("change", updateLoadNote);
 
 try { $("buildsPanel").open = localStorage.getItem("rfb.buildsOpen") === "1"; } catch {}
 $("buildsPanel").addEventListener("toggle", () => store("rfb.buildsOpen", $("buildsPanel").open ? "1" : "0"));
@@ -2120,10 +2211,15 @@ api("/api/state").then(async (s) => {
     session = s.session; initFeatures(); restoreSelection(); renderSummary(); renderList(); renderBudget(); runPreview();
     if (session.local) {
       store("rfb.srcdir", session.origin || session.sourceDir);
-      document.querySelector('input[name="srcmode"][value="local"]').checked = true;
+      $("srcmode").value = "local";
+    } else if (session.repo) {
+      store("rfb.repo", session.repoName);
+      store("rfb.repoRef", session.ref);
+      $("repoInput").value = session.repoName;
+      $("srcmode").value = "repo";
     } else {
       store("rfb.release", session.ref);
-      document.querySelector('input[name="srcmode"][value="release"]').checked = true;
+      $("srcmode").value = "release";
       if (releases.length) renderReleases();
     }
     applySourceMode();

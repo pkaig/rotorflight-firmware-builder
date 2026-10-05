@@ -8,7 +8,7 @@ import { DEFAULT_OUTPUT_DIR } from "./config.ts";
 import { runBuild, type BuildResult } from "./build.ts";
 import { resolveFeatures } from "./features.ts";
 import { ensureSource } from "./source.ts";
-import { ensureToolchain } from "./toolchain.ts";
+import { armSdkPrefix, ensureToolchain } from "./toolchain.ts";
 import { validTargetsFromSource } from "./targets.ts";
 import { BuildToolError } from "./errors.ts";
 import type { ExecEvent } from "./exec.ts";
@@ -83,7 +83,7 @@ export async function buildFirmware(
     jobs: opts.jobs,
     incremental: opts.incremental,
     extraMakeVars: toolchain.borrowed
-      ? { ...opts.extraMakeVars, ARM_SDK_PREFIX: `${toolchain.binDir}/arm-none-eabi-` }
+      ? { ...opts.extraMakeVars, ARM_SDK_PREFIX: armSdkPrefix(toolchain.binDir) }
       : opts.extraMakeVars,
     onEvent: opts.onEvent,
   });

@@ -312,9 +312,23 @@ boards. Either way, the header shows the board and its target:
 
 ### Step 2 — Choose the firmware source
 
+Choose where the firmware comes from in the **Firmware source** dropdown; the
+controls for that choice appear next to it.
+
 - **Rotorflight release** (the usual choice): pick a version from the list.
   Tick **RCs & snapshots** to include test versions. The official size of that
   release for your target is shown next to it (here `445.4 KB`).
+- **Online repository**: build someone's fork, or a branch with work in
+  progress, straight from the internet. Type the repository as `owner/repo`
+  for GitHub (for example `pkaig/rotorflight-firmware`), or paste the `https://`
+  address of any public git repository, then click **Find branches** (or press
+  **Enter**). Pick a branch or tag from the list: the default branch is marked,
+  and release tags come first. **Load firmware** then downloads that branch (each
+  repository is kept separately, so it is quick next time) and it works just like
+  a release. Recent repositories are offered as you type. Only public
+  repositories can be used. Because a fork's own tags are not the official
+  builds, the flash budget starts from the nearest official release until you
+  build the baseline.
 - **Local directory**: build a copy of the firmware source on your disk, for
   example your own clone with changes. See
   [section 10](#10-removing-features-firmware-guards-and-local-directories).
@@ -635,6 +649,7 @@ app's saved choices.
 | **Flash stops at "Waiting for the DFU device"** | Windows: install the WinUSB driver for "STM32 BOOTLOADER" (ImpulseRC Driver Fixer or Zadig). Linux: add the udev rule ([section 4](#the-udev-rule-dfu-bootloader-flashing)). Then **Try again**, or **Select DFU device…**. |
 | **"Board config not inserted" / Flash disabled in the dialog** | Choose the board in the header. Firmware without a board-config area must be flashed with the Configurator. |
 | **The connected board is a different MCU** | The app refuses to flash. Load and build the firmware for the board's own target. |
+| **Online repository: "was not found, or is private"** | Check the spelling (`owner/repo`, or the full `https://` address). Only public repositories can be used. |
 | **The first load takes a long time** | It downloads the firmware source and the 180 MB compiler. Later loads are quick. |
 | **"Firmware builds need a few tools…"** | Windows: click **Load build environment…**. Linux: install the listed packages. Then restart the app. |
 | **A build fails** | Read the last lines of the log. Changed options can fail to compile on some targets; switch back the last option you changed. |
